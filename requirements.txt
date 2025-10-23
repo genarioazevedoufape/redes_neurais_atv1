@@ -1,0 +1,15 @@
+streamlit>=1.25
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.2
+matplotlib>=3.7
+plotly>=5.15
+seaborn>=0.12
+statsmodels>=0.14
+nba_api>=1.1
+requests
+python-dotenv
+
+
+# opcional para performance
+joblib
