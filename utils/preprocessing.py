@@ -1,41 +1,44 @@
-## `utils/preprocessing.py`
-
-"""Funções para limpeza, transformação e preparação das features.
-"""
 import pandas as pd
-import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from typing import Tuple, List
 
-
-def prepare_dataset(df: pd.DataFrame, y_col: str, x_cols: List[str], test_size: float = 0.2, scale: bool = True, random_state: int = 42) -> Tuple:
-    """Seleciona X e y, trata NaNs, aplica split e escalonamento opcional.
-    Retorna: X_train, X_test, y_train, y_test, scaler (ou None)
+def prepare_data(df: pd.DataFrame, target_col: str, feature_cols: list, test_size: float = 0.2, random_state: int = 42):
     """
-    df_local = df.copy()
-    # Seleciona colunas
-    X = df_local[x_cols].copy()
-    y = df_local[y_col].copy()
-
-    # Tratamento simples de NaNs: remover linhas com NaN nas colunas selecionadas
-    valid_mask = pd.concat([X, y], axis=1).dropna().index
-    X = X.loc[valid_mask]
-    y = y.loc[valid_mask]
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
-
-    scaler = None
-    if scale:
-        scaler = StandardScaler()
-        X_train = pd.DataFrame(scaler.fit_transform(X_train), columns=x_cols, index=X_train.index)
-        X_test = pd.DataFrame(scaler.transform(X_test), columns=x_cols, index=X_test.index)
-
-    return X_train, X_test, y_train, y_test, scaler
-
-
-def binarize_target(y: pd.Series, threshold: float) -> pd.Series:
-    """Converte um target numérico para binário usando threshold (>= True/1).
-    útil para regressão logística.
+    Prepara os dados para o treinamento do modelo.
+    
+    Args:
+        df (pd.DataFrame): DataFrame de entrada com os dados da NBA.
+        target_col (str): Nome da coluna da variável dependente (Y).
+        feature_cols (list): Lista de nomes das colunas das variáveis independentes (X).
+        test_size (float): Proporção do conjunto de dados a ser usado para o teste.
+        random_state (int): Semente para reprodutibilidade.
+        
+    Returns:
+        tuple: (X_train, X_test, y_train, y_test, scaler)
     """
-    return (y >= threshold).astype(int)
+    
+    # 1. Seleção de Variáveis
+    # Remove linhas com valores NaN nas colunas relevantes
+    data = df.dropna(subset=[target_col] + feature_cols)
+    
+    X = data[feature_cols]
+    y = data[target_col]
+    
+    # 2. Divisão em Treino e Teste
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+    
+    # 3. Escalonamento dos Features (X)
+    # É importante escalar apenas X, e ajustar o scaler apenas nos dados de treino
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Retornar como DataFrame para manter os nomes das colunas, o que é útil para statsmodels
+    X_train_scaled_df = pd.DataFrame(X_train_scaled, columns=feature_cols, index=X_train.index)
+    X_test_scaled_df = pd.DataFrame(X_test_scaled, columns=feature_cols, index=X_test.index)
+    
+    # O Streamlit lida melhor com Series para y
+    return X_train_scaled_df, X_test_scaled_df, y_train, y_test, scaler
+
