@@ -4,6 +4,11 @@ import numpy as np
 import os
 import sys
 
+# Adicionar o diretório raiz do projeto ao path para importação modular
+# O diretório raiz é o diretório atual, então o path deve ser ajustado
+# para que os módulos sejam encontrados.
+# Como estamos no diretório 'nba_regression_app', o sys.path já deve incluir o '.'
+# No entanto, para garantir que as importações funcionem, vamos usar um try/except.
 try:
     from data.nba_data_loader import get_available_teams, get_team_id, load_team_game_log, get_available_stats_columns
     from utils.preprocessing import prepare_data
@@ -28,6 +33,7 @@ st.set_page_config(
 
 # --- Título Principal ---
 st.title("🏀 NBA Predictor: Análise Preditiva com Regressão")
+st.markdown("Desenvolvido para a temporada **2024-2025** usando `nba_api` e `Streamlit`.")
 
 # --- Sidebar para Entradas do Usuário ---
 st.sidebar.header("⚙️ Configurações da Análise")
@@ -58,6 +64,10 @@ if team_id:
             data_load_state.success("Dados carregados com sucesso!")
         else:
             data_load_state.warning("Nenhum dado encontrado para a temporada 2024-2025. Tentando carregar dados de exemplo.")
+            # Se não houver dados para 2024-2025 (porque a temporada ainda não começou ou a API está desatualizada), 
+            # o usuário não conseguirá testar. Vamos tentar carregar uma temporada anterior como fallback.
+            # O prompt exige 2024-2025, mas para a aplicação funcionar, um fallback é essencial.
+            # No entanto, vou manter o foco no prompt e apenas avisar.
             st.warning("A `nba_api` pode não ter dados para a temporada 2024-2025 ainda. A análise pode falhar.")
             
     except Exception as e:
@@ -86,7 +96,7 @@ if not df_raw.empty:
             y_col = None
         else:
             y_col = 'WIN'
-            st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota)")
+            st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota) - **Fixa para Logística**")
     else:
         # Regressão Linear: permite escolher
         # Filtrar 'WIN' e 'GAME_DATE'
@@ -200,4 +210,3 @@ if not df_raw.empty:
 
 else:
     st.warning("Por favor, selecione um time para carregar os dados e iniciar a análise.")
-
