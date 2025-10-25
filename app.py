@@ -99,7 +99,6 @@ if not df_raw.empty:
             st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota) - **Fixa para Logística**")
     else:
         # Regressão Linear: permite escolher
-        # Filtrar 'WIN' e 'GAME_DATE'
         linear_options = [col for col in y_options if col not in ['WIN', 'GAME_DATE']]
         if not linear_options:
             st.error("Não há variáveis numéricas disponíveis para Regressão Linear.")
@@ -112,7 +111,6 @@ if not df_raw.empty:
             )
     
     # 5. Selecionar variáveis independentes (X)
-    # Excluir Y e 'GAME_DATE' das opções de X
     x_options = [col for col in available_stats if col not in [y_col, 'GAME_DATE']]
     
     # Garantir que Logística não use 'WIN' em X
@@ -219,7 +217,17 @@ if not df_raw.empty:
                 
                 # Gráficos principais baseados no tipo de modelo
                 if regression_type == "Linear":
-                    # Gráficos para Regressão Linear
+                    st.subheader("🔍 Relações Individuais: Variáveis vs " + y_col)
+                    st.plotly_chart(
+                        plot_regression_line(df_raw, x_cols, y_col), 
+                        use_container_width=True
+                    )
+
+                    # Importância das Features
+                    st.subheader("🎯 Importância das Variáveis")
+                    st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
+                    
+                    # Os gráficos existentes continuam abaixo...
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -230,10 +238,7 @@ if not df_raw.empty:
                         st.subheader("📉 Gráfico de Resíduos")
                         st.plotly_chart(plot_residuals(y_test, y_pred, regression_type), use_container_width=True)
                     
-                    # Importância das Features
-                    st.subheader("🎯 Importância das Variáveis")
-                    st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
-                    
+
                 else:
                     # Gráficos para Regressão Logística
                     col1, col2 = st.columns(2)
@@ -261,13 +266,12 @@ if not df_raw.empty:
                     st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
                 
                 # 6. Análise de Tendência
-                st.header("📅 Análise Temporal")
                 st.subheader(f"📈 Tendência de {y_col} ao Longo do Tempo")
                 st.plotly_chart(
                     plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size), 
                     use_container_width=True
                 )
-                                   
+       
         except LinAlgError as e:
             if "singular matrix" in str(e).lower():
                 st.error("""
@@ -276,7 +280,7 @@ if not df_raw.empty:
                 - Mais variáveis do que observações
                 - Variáveis com variância zero
                 
-                **💡 Soluções**:
+                **💡 Soluções**: 
                 - Remova variáveis altamente correlacionadas
                 - Reduza o número de variáveis independentes
                 - Tente diferentes combinações de variáveis
@@ -292,7 +296,6 @@ if not df_raw.empty:
     elif run_analysis and (not y_col or not x_cols):
         st.warning("⚠️ Por favor, selecione a Variável Dependente (Y) e pelo menos uma Variável Independente (X) para executar a análise.")
 
-# Mensagem final se não houver dados
 else:
     st.info("👆 Selecione uma equipe na sidebar para começar a análise.")
 

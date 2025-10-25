@@ -6,15 +6,6 @@ def prepare_data(df: pd.DataFrame, target_col: str, feature_cols: list, test_siz
     """
     Prepara os dados para o treinamento do modelo.
     
-    Args:
-        df (pd.DataFrame): DataFrame de entrada com os dados da NBA.
-        target_col (str): Nome da coluna da variável dependente (Y).
-        feature_cols (list): Lista de nomes das colunas das variáveis independentes (X).
-        test_size (float): Proporção do conjunto de dados a ser usado para o teste.
-        random_state (int): Semente para reprodutibilidade.
-        
-    Returns:
-        tuple: (X_train, X_test, y_train, y_test, scaler)
     """
     # 1. Verificar se há colunas suficientes
     if not feature_cols:

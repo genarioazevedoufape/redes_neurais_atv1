@@ -89,6 +89,168 @@ def plot_regression_line(df: pd.DataFrame, X_cols: list, y_col: str):
     
     return fig
 
+def plot_logistic_relationships(df: pd.DataFrame, X_cols: list, y_col: str):
+    """
+    Gráfico adequado para visualizar relações em regressão logística.
+    Mostra a probabilidade estimada em função de cada variável independente.
+    """
+    if df.empty or not X_cols:
+        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
+
+    display_cols = X_cols[:4] if len(X_cols) > 4 else X_cols
+    rows = (len(display_cols) + 1) // 2
+    cols = 2 if len(display_cols) > 1 else 1
+    
+    fig = make_subplots(
+        rows=rows, 
+        cols=cols,
+        subplot_titles=[f"Probabilidade de Vitória vs {x_col}" for x_col in display_cols]
+    )
+    
+    for i, x_col in enumerate(display_cols):
+        row = (i // cols) + 1
+        col = (i % cols) + 1
+        
+        # Filtrar dados válidos
+        valid_data = df[[x_col, y_col]].dropna()
+        
+        if len(valid_data) > 1:
+            # Usar suavização para mostrar a tendência logística
+            try:
+                # Agrupar por bins da variável X e calcular média de Y (probabilidade)
+                valid_data['bin'] = pd.cut(valid_data[x_col], bins=8)
+                bin_stats = valid_data.groupby('bin').agg({
+                    x_col: 'mean', 
+                    y_col: ['mean', 'count']
+                }).reset_index()
+                
+                # Flatten column names
+                bin_stats.columns = ['bin', f'{x_col}_mean', 'win_prob', 'count']
+                bin_stats = bin_stats[bin_stats['count'] > 1]  # Remover bins com poucos dados
+                
+                if len(bin_stats) > 1:
+                    # Linha de tendência logística (probabilidade média por bin)
+                    line = go.Scatter(
+                        x=bin_stats[f'{x_col}_mean'],
+                        y=bin_stats['win_prob'],
+                        mode='lines+markers',
+                        name='Tendência',
+                        line=dict(color='red', width=3),
+                        marker=dict(size=8, color='red'),
+                        showlegend=False
+                    )
+                    fig.add_trace(line, row=row, col=col)
+                
+                # Scatter plot dos dados originais (com jitter para evitar sobreposição)
+                np.random.seed(42)  # Para reproducibilidade
+                scatter = go.Scatter(
+                    x=valid_data[x_col] + np.random.normal(0, 0.01, len(valid_data)),  # pequeno jitter
+                    y=valid_data[y_col] + np.random.normal(0, 0.02, len(valid_data)),
+                    mode='markers',
+                    name='Dados',
+                    showlegend=False,
+                    marker=dict(
+                        size=6, 
+                        opacity=0.4, 
+                        color=valid_data[y_col].map({0: 'red', 1: 'green'}),
+                        line=dict(width=0.5, color='DarkSlateGrey')
+                    )
+                )
+                fig.add_trace(scatter, row=row, col=col)
+                
+            except Exception as e:
+                # Fallback: scatter plot simples
+                scatter = go.Scatter(
+                    x=valid_data[x_col],
+                    y=valid_data[y_col],
+                    mode='markers',
+                    name=f'{x_col}',
+                    showlegend=False,
+                    marker=dict(
+                        size=8, 
+                        opacity=0.7,
+                        color=valid_data[y_col].map({0: 'red', 1: 'green'})
+                    )
+                )
+                fig.add_trace(scatter, row=row, col=col)
+            
+            fig.update_xaxes(title_text=x_col, row=row, col=col)
+            fig.update_yaxes(
+                title_text='Prob. Vitória', 
+                row=row, col=col,
+                tickvals=[0, 0.5, 1],
+                range=[-0.1, 1.1]
+            )
+        else:
+            # Adicionar mensagem de dados insuficientes
+            fig.add_annotation(
+                text="Dados insuficientes",
+                xref=f"x{i+1}", yref=f"y{i+1}",
+                x=0.5, y=0.5, showarrow=False,
+                row=row, col=col
+            )
+    
+    fig.update_layout(
+        height=400 * rows,
+        title_text="Relações para Regressão Logística - Probabilidade de Vitória",
+        showlegend=False,
+        template="plotly_white"
+    )
+    
+    return fig
+
+def plot_logistic_density(df: pd.DataFrame, X_cols: list, y_col: str):
+    """
+    Mostra a distribuição das variáveis contínuas separadas por resultado (vitória/derrota).
+    """
+    if df.empty or not X_cols:
+        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
+        
+    display_cols = X_cols[:4] if len(X_cols) > 4 else X_cols
+    
+    fig = make_subplots(
+        rows=len(display_cols), 
+        cols=1,
+        subplot_titles=[f"Distribuição de {x_col} por Resultado" for x_col in display_cols]
+    )
+    
+    for i, x_col in enumerate(display_cols):
+        row = i + 1
+        
+        # Dados para vitórias e derrotas
+        wins = df[df[y_col] == 1][x_col].dropna()
+        losses = df[df[y_col] == 0][x_col].dropna()
+        
+        if len(wins) > 0 and len(losses) > 0:
+            # Box plot para comparar distribuições
+            fig.add_trace(
+                go.Box(
+                    y=wins, 
+                    name='Vitórias', 
+                    marker_color='lightgreen',
+                    boxpoints='outliers'
+                ), 
+                row=row, col=1
+            )
+            fig.add_trace(
+                go.Box(
+                    y=losses, 
+                    name='Derrotas', 
+                    marker_color='lightcoral',
+                    boxpoints='outliers'
+                ), 
+                row=row, col=1
+            )
+    
+    fig.update_layout(
+        height=300 * len(display_cols),
+        title_text="Distribuição das Variáveis por Resultado do Jogo",
+        template="plotly_white",
+        showlegend=False
+    )
+    
+    return fig
+
 def plot_prediction_vs_reality(y_true: pd.Series, y_pred: np.ndarray, model_type: str):
     """
     Gera um Gráfico de Previsão vs. Realidade (Plotly).

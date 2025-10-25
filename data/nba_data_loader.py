@@ -35,7 +35,6 @@ def load_team_game_log(team_id):
         games = game_finder.get_data_frames()[0]
         
         # Filtrar apenas os jogos da temporada 2024-2025 (embora já tenhamos passado a season_nullable)
-        # e garantir que a coluna 'GAME_DATE' seja um datetime
         games['GAME_DATE'] = pd.to_datetime(games['GAME_DATE'])
         
         # Selecionar e renomear colunas relevantes para a análise
