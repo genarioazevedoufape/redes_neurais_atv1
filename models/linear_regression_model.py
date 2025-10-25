@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 import statsmodels.api as sm
+from numpy.linalg import LinAlgError
 
 class LinearRegressionModel:
     """
@@ -19,11 +20,18 @@ class LinearRegressionModel:
         # Treinamento com scikit-learn
         self.model.fit(X_train, y_train)
         
-        # Treinamento com statsmodels para estatísticas detalhadas (Extra)
-        # Adicionar a constante para o intercepto
-        X_train_sm = sm.add_constant(X_train)
-        sm_model = sm.OLS(y_train, X_train_sm)
-        self.statsmodels_results = sm_model.fit()
+        # Treinamento com statsmodels para estatísticas detalhadas (com tratamento de erros)
+        if len(X_train) > len(X_train.columns) + 1:  # Garantir dados suficientes
+            X_train_sm = sm.add_constant(X_train)
+            try:
+                sm_model = sm.OLS(y_train, X_train_sm)
+                self.statsmodels_results = sm_model.fit()
+            except (LinAlgError, ValueError) as e:
+                print(f"Statsmodels falhou devido a: {e}. Continuando com scikit-learn.")
+                self.statsmodels_results = None
+        else:
+            self.statsmodels_results = None
+            print("Dados insuficientes para statsmodels.")
 
     def predict(self, X_test: pd.DataFrame) -> np.ndarray:
         """
@@ -49,12 +57,12 @@ class LinearRegressionModel:
         intercept = self.model.intercept_
         coefficients = self.model.coef_
         
-        equation = f"y = {intercept:.2f}"
+        equation = f"y = {intercept:.4f}"
         
         for i, col in enumerate(feature_cols):
             coef = coefficients[i]
-            sign = "+" if coef >= 0 else "-"
-            equation += f" {sign} {abs(coef):.2f}*{col}"
+            sign = " + " if coef >= 0 else " - "
+            equation += f"{sign} {abs(coef):.4f}×{col}"
             
         equation += " + ε"
         return equation
@@ -80,7 +88,5 @@ class LinearRegressionModel:
         Retorna o resumo do statsmodels para o modo avançado.
         """
         if self.statsmodels_results:
-            # Retorna o resumo como string para exibição no Streamlit
             return self.statsmodels_results.summary().as_html()
-        return "Resumo do Statsmodels não disponível."
-
+        return "<p>Resumo do Statsmodels não disponível (possível problema de singularidade ou dados insuficientes).</p>"

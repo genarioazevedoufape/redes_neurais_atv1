@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import statsmodels.api as sm
+from numpy.linalg import LinAlgError
 
 class LogisticRegressionModel:
     """
@@ -10,21 +11,33 @@ class LogisticRegressionModel:
     """
     def __init__(self):
         # Aumentar max_iter para evitar warnings de convergência
-        self.model = LogisticRegression(max_iter=1000, solver='liblinear')
+        self.model = LogisticRegression(max_iter=1000, solver='liblinear', random_state=42)
         self.statsmodels_results = None
 
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         """
-        Treina o modelo de Regressão Logística.
+        Treina o modelo de Regressão Logística com tratamento de erros.
         """
-        # Treinamento com scikit-learn
-        # A Regressão Logística do scikit-learn espera que y_train seja binário (0 ou 1)
-        self.model.fit(X_train, y_train)
-        
-        # Treinamento com statsmodels para estatísticas detalhadas (Extra)
-        X_train_sm = sm.add_constant(X_train)
-        sm_model = sm.Logit(y_train, X_train_sm)
-        self.statsmodels_results = sm_model.fit(disp=False) # disp=False para não imprimir o resumo no console
+        try:
+            # Treinamento com scikit-learn
+            self.model.fit(X_train, y_train)
+            
+            # Treinamento com statsmodels (com tratamento robusto de erros)
+            if len(X_train) > len(X_train.columns) + 1:  # Garantir dados suficientes
+                X_train_sm = sm.add_constant(X_train)
+                try:
+                    sm_model = sm.Logit(y_train, X_train_sm)
+                    self.statsmodels_results = sm_model.fit(disp=False, maxiter=1000, method='bfgs')
+                except (LinAlgError, ValueError) as e:
+                    print(f"Statsmodels falhou devido a: {e}. Continuando com scikit-learn.")
+                    self.statsmodels_results = None
+            else:
+                self.statsmodels_results = None
+                print("Dados insuficientes para statsmodels.")
+            
+        except Exception as e:
+            print(f"Erro no treinamento: {e}")
+            raise
 
     def predict_proba(self, X_test: pd.DataFrame) -> np.ndarray:
         """
@@ -49,7 +62,7 @@ class LogisticRegressionModel:
             'Precisão': precision_score(y_true, y_pred_class, zero_division=0),
             'Recall': recall_score(y_true, y_pred_class, zero_division=0),
             'F1-score': f1_score(y_true, y_pred_class, zero_division=0),
-            'AUC-ROC': roc_auc_score(y_true, y_pred_proba)
+            'AUC-ROC': roc_auc_score(y_true, y_pred_proba) if len(np.unique(y_true)) > 1 else 0.5
         }
         return metrics
 
@@ -75,5 +88,4 @@ class LogisticRegressionModel:
         """
         if self.statsmodels_results:
             return self.statsmodels_results.summary().as_html()
-        return "Resumo do Statsmodels não disponível."
-
+        return "<p>Resumo do Statsmodels não disponível (possível problema de singularidade ou dados insuficientes).</p>"

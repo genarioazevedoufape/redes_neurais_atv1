@@ -1,3 +1,4 @@
+from matplotlib.pylab import LinAlgError
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -130,6 +131,7 @@ if not df_raw.empty:
     run_analysis = st.sidebar.button("▶️ Executar Análise")
     
     # --- Lógica Principal da Análise ---
+    # --- Lógica Principal da Análise ---
     if run_analysis and y_col and x_cols:
         
         st.header(f"Resultados da Análise de Regressão {regression_type}")
@@ -139,9 +141,11 @@ if not df_raw.empty:
             # 1. Pré-processamento e Divisão de Dados
             X_train, X_test, y_train, y_test, scaler = prepare_data(df_raw, y_col, x_cols)
             
-            # Verificar se há dados suficientes para treino/teste
+            # Verificar se há dados suficientes
             if X_train.empty or X_test.empty:
-                st.error("Dados insuficientes para treino e teste após o pré-processamento. Tente selecionar menos variáveis ou um time com mais jogos.")
+                st.error("Dados insuficientes para treino e teste após o pré-processamento.")
+            elif len(X_train) < len(x_cols) + 1:
+                st.warning(f"Poucos dados ({len(X_train)}) para o número de variáveis ({len(x_cols)}). Tente reduzir as variáveis independentes.")
             else:
                 # 2. Treinamento do Modelo
                 if regression_type == "Linear":
@@ -174,14 +178,14 @@ if not df_raw.empty:
                 # 4. Visualizações
                 st.header("Visualizações")
                 
-                # Gráfico de Tendência (Usa a coluna 'GAME_DATE' do df_raw)
+                # Gráfico de Tendência com Intervalo de Confiança
                 st.subheader(f"Tendência de {y_col} ao longo do tempo")
                 st.plotly_chart(plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col), use_container_width=True)
                 
-                # Gráfico de Dispersão (apenas para Linear, usando a primeira variável X)
-                if regression_type == "Linear":
-                    st.subheader(f"Diagrama de Dispersão: {y_col} vs {x_cols[0]}")
-                    st.plotly_chart(plot_regression_line(df_raw, x_cols[0], y_col), use_container_width=True)
+                # Gráfico de Dispersão Múltiplo (apenas para Linear)
+                if regression_type == "Linear" and x_cols:
+                    st.subheader(f"Diagrama de Dispersão: {y_col} vs Variáveis Independentes")
+                    st.plotly_chart(plot_regression_line(df_raw, x_cols, y_col), use_container_width=True)
                 
                 # Gráfico Previsão vs Realidade
                 st.subheader("Previsão vs. Realidade")
@@ -201,12 +205,26 @@ if not df_raw.empty:
                     st.subheader("Resumo Avançado (Statsmodels)")
                     st.components.v1.html(model.get_statsmodels_summary(), height=500, scrolling=True)
                     
+        except LinAlgError as e:
+            if "singular matrix" in str(e).lower():
+                st.error("""
+                **Erro de Matriz Singular**: Isso geralmente ocorre quando:
+                - Há multicolinearidade (variáveis muito correlacionadas)
+                - Mais variáveis do que observações
+                - Variáveis com variância zero
+                
+                **Soluções**:
+                - Remova variáveis altamente correlacionadas
+                - Reduza o número de variáveis independentes
+                - Tente diferentes combinações de variáveis
+                """)
+            else:
+                st.error(f"Erro de álgebra linear: {e}")
+        except ValueError as e:
+            st.error(f"Erro nos dados: {e}")
         except Exception as e:
             st.error(f"Ocorreu um erro durante a análise: {e}")
             st.exception(e)
             
     elif run_analysis and (not y_col or not x_cols):
         st.warning("Por favor, selecione a Variável Dependente (Y) e pelo menos uma Variável Independente (X) para executar a análise.")
-
-else:
-    st.warning("Por favor, selecione um time para carregar os dados e iniciar a análise.")
