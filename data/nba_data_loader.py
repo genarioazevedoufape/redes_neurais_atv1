@@ -3,7 +3,6 @@ import streamlit as st
 from nba_api.stats.static import teams
 from nba_api.stats.endpoints import leaguegamefinder, playergamelog
 
-# Temporada alvo conforme o prompt
 SEASON = '2024-25'
 
 @st.cache_data
