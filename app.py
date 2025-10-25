@@ -6,14 +6,14 @@ import os
 import sys
 
 # Adicionar o diretório raiz do projeto ao path para importação modular
-# O diretório raiz é o diretório atual, então o path deve ser ajustado
-# para que os módulos sejam encontrados.
-# Como estamos no diretório 'nba_regression_app', o sys.path já deve incluir o '.'
-# No entanto, para garantir que as importações funcionem, vamos usar um try/except.
 try:
     from data.nba_data_loader import get_available_teams, get_team_id, load_team_game_log, get_available_stats_columns
     from utils.preprocessing import prepare_data
-    from utils.visualization import plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, plot_trend_with_confidence
+    from utils.visualization import (
+        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
+        plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
+        plot_feature_importance, plot_residuals  # Remover display_all_plots
+    )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
 except ImportError:
@@ -21,7 +21,11 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from data.nba_data_loader import get_available_teams, get_team_id, load_team_game_log, get_available_stats_columns
     from utils.preprocessing import prepare_data
-    from utils.visualization import plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, plot_trend_with_confidence
+    from utils.visualization import (
+        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
+        plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
+        plot_feature_importance, plot_residuals  # Remover display_all_plots
+    )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
 
@@ -65,10 +69,6 @@ if team_id:
             data_load_state.success("Dados carregados com sucesso!")
         else:
             data_load_state.warning("Nenhum dado encontrado para a temporada 2024-2025. Tentando carregar dados de exemplo.")
-            # Se não houver dados para 2024-2025 (porque a temporada ainda não começou ou a API está desatualizada), 
-            # o usuário não conseguirá testar. Vamos tentar carregar uma temporada anterior como fallback.
-            # O prompt exige 2024-2025, mas para a aplicação funcionar, um fallback é essencial.
-            # No entanto, vou manter o foco no prompt e apenas avisar.
             st.warning("A `nba_api` pode não ter dados para a temporada 2024-2025 ainda. A análise pode falhar.")
             
     except Exception as e:
@@ -126,11 +126,45 @@ if not df_raw.empty:
         default=x_options[:3] if len(x_options) >= 3 else x_options
     )
     
+    # Configurações avançadas
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔧 Configurações Avançadas")
+    
+    # Tamanho do conjunto de teste
+    test_size = st.sidebar.slider(
+        "Tamanho do Conjunto de Teste:",
+        min_value=0.1,
+        max_value=0.5,
+        value=0.2,
+        step=0.05,
+        help="Proporção dos dados que serão usados para teste"
+    )
+    
+    # Janela para média móvel
+    window_size = st.sidebar.slider(
+        "Janela da Média Móvel:",
+        min_value=3,
+        max_value=10,
+        value=5,
+        step=1,
+        help="Número de jogos para calcular a média móvel"
+    )
+    
+    # Threshold para classificação (apenas logística)
+    if regression_type == "Logística":
+        threshold = st.sidebar.slider(
+            "Threshold de Classificação:",
+            min_value=0.1,
+            max_value=0.9,
+            value=0.5,
+            step=0.05,
+            help="Probabilidade mínima para classificar como vitória"
+        )
+    
     # 6. Botão de Execução
     st.sidebar.markdown("---")
     run_analysis = st.sidebar.button("▶️ Executar Análise")
     
-    # --- Lógica Principal da Análise ---
     # --- Lógica Principal da Análise ---
     if run_analysis and y_col and x_cols:
         
@@ -139,7 +173,9 @@ if not df_raw.empty:
         
         try:
             # 1. Pré-processamento e Divisão de Dados
-            X_train, X_test, y_train, y_test, scaler = prepare_data(df_raw, y_col, x_cols)
+            X_train, X_test, y_train, y_test, scaler = prepare_data(
+                df_raw, y_col, x_cols, test_size=test_size
+            )
             
             # Verificar se há dados suficientes
             if X_train.empty or X_test.empty:
@@ -158,62 +194,131 @@ if not df_raw.empty:
                     model = LogisticRegressionModel()
                     model.train(X_train, y_train)
                     y_pred_proba = model.predict_proba(X_test)
-                    y_pred_class = model.predict_class(X_test)
+                    y_pred_class = model.predict_class(X_test, threshold=threshold)
                     metrics = model.evaluate(y_test, y_pred_class, y_pred_proba)
                     
                 # 3. Exibição de Métricas e Coeficientes
-                st.subheader("Métricas de Avaliação")
-                metrics_df = pd.DataFrame(metrics.items(), columns=['Métrica', 'Valor'])
-                st.dataframe(metrics_df.style.format({'Valor': "{:.4f}"}), hide_index=True)
-
-                st.subheader("Coeficientes da Regressão (β)")
-                df_coef = model.get_coefficients(x_cols)
-                st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("📊 Métricas de Avaliação")
+                    metrics_df = pd.DataFrame(metrics.items(), columns=['Métrica', 'Valor'])
+                    st.dataframe(metrics_df.style.format({'Valor': "{:.4f}"}), hide_index=True)
+                
+                with col2:
+                    st.subheader("🔢 Coeficientes da Regressão (β)")
+                    df_coef = model.get_coefficients(x_cols)
+                    st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
                 
                 # Equação da Regressão (apenas para Linear)
                 if regression_type == "Linear":
-                    st.subheader("Equação da Regressão")
+                    st.subheader("📐 Equação da Regressão")
                     st.code(model.get_equation(x_cols), language='markdown')
-                    
-                # 4. Visualizações
-                st.header("Visualizações")
                 
-                # Gráfico de Tendência com Intervalo de Confiança
-                st.subheader(f"Tendência de {y_col} ao longo do tempo")
-                st.plotly_chart(plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col), use_container_width=True)
+                # 4. Visualizações Principais
+                st.header("📈 Visualizações")
                 
-                # Gráfico de Dispersão Múltiplo (apenas para Linear)
-                if regression_type == "Linear" and x_cols:
-                    st.subheader(f"Diagrama de Dispersão: {y_col} vs Variáveis Independentes")
-                    st.plotly_chart(plot_regression_line(df_raw, x_cols, y_col), use_container_width=True)
-                
-                # Gráfico Previsão vs Realidade
-                st.subheader("Previsão vs. Realidade")
+                # Gráficos principais baseados no tipo de modelo
                 if regression_type == "Linear":
-                    st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, regression_type), use_container_width=True)
+                    # Gráficos para Regressão Linear
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("📊 Previsão vs Realidade")
+                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, regression_type), use_container_width=True)
+                    
+                    with col2:
+                        st.subheader("📉 Gráfico de Resíduos")
+                        st.plotly_chart(plot_residuals(y_test, y_pred, regression_type), use_container_width=True)
+                    
+                    # Importância das Features
+                    st.subheader("🎯 Importância das Variáveis")
+                    st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
+                    
                 else:
-                    st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, regression_type), use_container_width=True)
+                    # Gráficos para Regressão Logística
+                    col1, col2 = st.columns(2)
                     
-                # Matriz de Confusão (apenas para Logística)
-                if regression_type == "Logística":
-                    st.subheader("Matriz de Confusão")
-                    st.pyplot(plot_confusion_matrix(y_test, y_pred_class), use_container_width=True)
+                    with col1:
+                        st.subheader("📊 Probabilidade de Vitória")
+                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, regression_type), use_container_width=True)
+                        
+                    with col2:
+                        st.subheader("📈 Curva ROC")
+                        st.plotly_chart(plot_roc_curve(y_test, y_pred_proba), use_container_width=True)
                     
-                # Extras (Statsmodels Summary)
+                    col3, col4 = st.columns(2)
+                    
+                    with col3:
+                        st.subheader("🎯 Matriz de Confusão")
+                        st.pyplot(plot_confusion_matrix(y_test, y_pred_class), use_container_width=True)
+                        
+                    with col4:
+                        st.subheader("⚖️ Curva de Calibração")
+                        st.plotly_chart(plot_calibration_curve(y_test, y_pred_proba), use_container_width=True)
+                    
+                    # Importância das Features
+                    st.subheader("📊 Importância das Variáveis")
+                    st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
+                
+                # 6. Análise de Tendência
+                st.header("📅 Análise Temporal")
+                st.subheader(f"📈 Tendência de {y_col} ao Longo do Tempo")
+                st.plotly_chart(
+                    plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size), 
+                    use_container_width=True
+                )
+                
+                # 7. Informações do Modelo
                 st.sidebar.markdown("---")
-                if st.sidebar.checkbox('Mostrar Resumo Avançado (Statsmodels)'):
-                    st.subheader("Resumo Avançado (Statsmodels)")
-                    st.components.v1.html(model.get_statsmodels_summary(), height=500, scrolling=True)
+                if st.sidebar.checkbox('📋 Mostrar Resumo Avançado (Statsmodels)'):
+                    st.header("🔬 Resumo Avançado do Modelo")
+                    st.subheader("📊 Estatísticas Detalhadas (Statsmodels)")
+                    st.components.v1.html(model.get_statsmodels_summary(), height=600, scrolling=True)
+                
+                # 8. Download dos Resultados
+                st.sidebar.markdown("---")
+                if st.sidebar.checkbox('💾 Exportar Resultados'):
+                    st.header("📥 Exportar Resultados")
+                    
+                    # Criar DataFrame com resultados
+                    results_df = pd.DataFrame({
+                        'Realidade': y_test,
+                        'Previsão': y_pred if regression_type == "Linear" else y_pred_class,
+                        'Probabilidade': y_pred_proba if regression_type == "Logística" else np.nan
+                    })
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Download dos dados de resultados
+                        csv = results_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Baixar Resultados (CSV)",
+                            data=csv,
+                            file_name=f"resultados_{selected_team_name}_{regression_type}.csv",
+                            mime="text/csv"
+                        )
+                    
+                    with col2:
+                        # Download das métricas
+                        metrics_csv = metrics_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Baixar Métricas (CSV)",
+                            data=metrics_csv,
+                            file_name=f"metricas_{selected_team_name}_{regression_type}.csv",
+                            mime="text/csv"
+                        )
                     
         except LinAlgError as e:
             if "singular matrix" in str(e).lower():
                 st.error("""
-                **Erro de Matriz Singular**: Isso geralmente ocorre quando:
+                **❌ Erro de Matriz Singular**: Isso geralmente ocorre quando:
                 - Há multicolinearidade (variáveis muito correlacionadas)
                 - Mais variáveis do que observações
                 - Variáveis com variância zero
                 
-                **Soluções**:
+                **💡 Soluções**:
                 - Remova variáveis altamente correlacionadas
                 - Reduza o número de variáveis independentes
                 - Tente diferentes combinações de variáveis
@@ -227,4 +332,19 @@ if not df_raw.empty:
             st.exception(e)
             
     elif run_analysis and (not y_col or not x_cols):
-        st.warning("Por favor, selecione a Variável Dependente (Y) e pelo menos uma Variável Independente (X) para executar a análise.")
+        st.warning("⚠️ Por favor, selecione a Variável Dependente (Y) e pelo menos uma Variável Independente (X) para executar a análise.")
+
+# Mensagem final se não houver dados
+else:
+    st.info("👆 Selecione uma equipe na sidebar para começar a análise.")
+
+# Rodapé
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; color: gray;'>
+    🏀 Desenvolvido com NBA API e Streamlit • Análise Preditiva de Dados da NBA
+    </div>
+    """,
+    unsafe_allow_html=True
+)

@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, roc_curve, auc
+from sklearn.calibration import calibration_curve
 
 def plot_regression_line(df: pd.DataFrame, X_cols: list, y_col: str):
     """
@@ -110,20 +111,30 @@ def plot_prediction_vs_reality(y_true: pd.Series, y_pred: np.ndarray, model_type
     
     elif model_type == 'Logística':
         # Para Logística, y_true é binário (0 ou 1) e y_pred é a probabilidade (0 a 1)
-        # Vamos plotar a probabilidade de 1 (sucesso) contra o índice
-        df['Índice'] = df.index
+        df['Índice'] = range(len(df))  # Índice sequencial para melhor visualização
+        
         fig = px.scatter(
             df,
-            x=df.index,
+            x='Índice',
             y='Previsão',
-            color=df['Realidade'].astype(str), # Converter para string para cores discretas
+            color=df['Realidade'].astype(str),
             color_discrete_map={'0': 'red', '1': 'green'},
-            title='Probabilidade de Sucesso (Regressão Logística)',
-            labels={'x': 'Índice do Jogo', 'Previsão': 'Probabilidade de Sucesso (Y=1)', 'color': 'Realidade'},
+            title='Probabilidade de Vitória (Regressão Logística)',
+            labels={'Índice': 'Sequência de Jogos', 'Previsão': 'Probabilidade de Vitória', 'color': 'Resultado Real'},
             template="plotly_white"
         )
+        
+        # Configurações específicas para regressão logística
+        fig.update_yaxes(range=[0, 1], title="Probabilidade de Vitória")
+        fig.update_xaxes(title="Sequência de Jogos")
+        
         # Adicionar linha de corte (threshold) em 0.5
-        fig.add_hline(y=0.5, line_dash="dash", annotation_text="Threshold 0.5", annotation_position="top right")
+        fig.add_hline(y=0.5, line_dash="dash", 
+                     annotation_text="Threshold 0.5", 
+                     annotation_position="top right")
+        
+        # Melhorar a legenda
+        fig.update_layout(legend_title_text='Resultado Real')
         
     else:
         return go.Figure().add_annotation(text="Tipo de modelo desconhecido.")
@@ -171,7 +182,8 @@ def plot_trend_with_confidence(df: pd.DataFrame, date_col: str, y_col: str, wind
         y=df_plot[y_col],
         mode='markers',
         name=y_col,
-        marker=dict(size=6, opacity=0.6)
+        marker=dict(size=8, opacity=0.7, 
+                   color=df_plot[y_col].map({0: 'red', 1: 'green'}) if y_col == 'WIN' else 'blue')
     ))
     
     # Média móvel
@@ -196,6 +208,14 @@ def plot_trend_with_confidence(df: pd.DataFrame, date_col: str, y_col: str, wind
             showlegend=True
         ))
     
+    # Configurações específicas para variável WIN
+    if y_col == 'WIN':
+        fig.update_yaxes(
+            tickvals=[0, 1],
+            ticktext=['Derrota', 'Vitória'],
+            range=[-0.1, 1.1]
+        )
+    
     fig.update_layout(
         title=f"Tendência de {y_col} ao longo do tempo com Intervalo de Confiança",
         xaxis_title='Data do Jogo',
@@ -204,5 +224,144 @@ def plot_trend_with_confidence(df: pd.DataFrame, date_col: str, y_col: str, wind
         hovermode='x unified'
     )
     
-    return fig
+    # Formatação do eixo X para datas
+    fig.update_xaxes(
+        tickformat="%b %Y",
+        dtick="M1"
+    )
     
+    return fig
+
+def plot_roc_curve(y_true: pd.Series, y_pred_proba: np.ndarray):
+    """
+    Gera a Curva ROC para avaliação do modelo de classificação.
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+    
+    fig = go.Figure()
+    
+    # Área sob a curva
+    fig.add_trace(go.Scatter(
+        x=fpr, y=tpr,
+        mode='lines',
+        name=f'ROC curve (AUC = {roc_auc:.4f})',
+        line=dict(color='darkorange', width=3),
+        fill='tozeroy',
+        fillcolor='rgba(255,165,0,0.2)'
+    ))
+    
+    # Linha de referência (classificador aleatório)
+    fig.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1],
+        mode='lines',
+        name='Classificador Aleatório',
+        line=dict(color='navy', width=2, dash='dash')
+    ))
+    
+    fig.update_layout(
+        title=f'Curva ROC (AUC = {roc_auc:.4f})',
+        xaxis_title='Taxa de Falsos Positivos',
+        yaxis_title='Taxa de Verdadeiros Positivos',
+        template="plotly_white",
+        showlegend=True
+    )
+    
+    fig.update_xaxes(range=[0, 1])
+    fig.update_yaxes(range=[0, 1])
+    
+    return fig
+
+def plot_calibration_curve(y_true: pd.Series, y_pred_proba: np.ndarray, n_bins: int = 10):
+    """
+    Gera gráfico de calibração para verificar se as probabilidades estão bem calibradas.
+    """
+    prob_true, prob_pred = calibration_curve(y_true, y_pred_proba, n_bins=n_bins)
+    
+    fig = go.Figure()
+    
+    # Curva de calibração
+    fig.add_trace(go.Scatter(
+        x=prob_pred, y=prob_true,
+        mode='lines+markers',
+        name='Curva de Calibração',
+        line=dict(color='blue', width=3),
+        marker=dict(size=8)
+    ))
+    
+    # Linha de referência (calibração perfeita)
+    fig.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1],
+        mode='lines',
+        name='Calibração Perfeita',
+        line=dict(color='red', width=2, dash='dash')
+    ))
+    
+    fig.update_layout(
+        title='Curva de Calibração das Probabilidades',
+        xaxis_title='Probabilidade Prevista Média',
+        yaxis_title='Fração de Positivos',
+        template="plotly_white",
+        showlegend=True
+    )
+    
+    fig.update_xaxes(range=[0, 1])
+    fig.update_yaxes(range=[0, 1])
+    
+    return fig
+
+def plot_feature_importance(coef: np.ndarray, feature_names: list, model_type: str = 'Logística'):
+    """
+    Gera gráfico de importância das features baseado nos coeficientes.
+    """
+    importance_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Importance': np.abs(coef)
+    }).sort_values('Importance', ascending=True)
+    
+    fig = px.bar(
+        importance_df,
+        x='Importance',
+        y='Feature',
+        orientation='h',
+        title=f'Importância das Variáveis (Regressão {model_type})',
+        color='Importance',
+        color_continuous_scale='Blues'
+    )
+    
+    fig.update_layout(
+        template="plotly_white",
+        showlegend=False,
+        xaxis_title='Importância Absoluta',
+        yaxis_title='Variáveis'
+    )
+    
+    return fig
+
+def plot_residuals(y_true: pd.Series, y_pred: np.ndarray, model_type: str):
+    """
+    Gera gráfico de resíduos para análise de regressão linear.
+    """
+    residuals = y_true - y_pred
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=y_pred,
+        y=residuals,
+        mode='markers',
+        name='Resíduos',
+        marker=dict(size=8, opacity=0.7, color='blue')
+    ))
+    
+    # Linha de referência em y=0
+    fig.add_hline(y=0, line_dash="dash", line_color="red")
+    
+    fig.update_layout(
+        title=f'Gráfico de Resíduos (Regressão {model_type})',
+        xaxis_title='Valores Preditos',
+        yaxis_title='Resíduos (Real - Previsto)',
+        template="plotly_white"
+    )
+    
+    return fig
