@@ -28,9 +28,6 @@ def load_team_game_log(team_id):
     Retorna um DataFrame com as estatísticas do jogo.
     """
     try:
-        # Usando LeagueGameFinder para obter logs de jogos de um time específico na temporada
-        # A nba_api não tem um endpoint PlayerGameLog para times, então usamos LeagueGameFinder
-        # e filtramos pelo ID do time.
         game_finder = leaguegamefinder.LeagueGameFinder(
             team_id_nullable=team_id,
             season_nullable=SEASON
@@ -53,11 +50,9 @@ def load_team_game_log(team_id):
         return data.sort_values(by='GAME_DATE', ascending=True)
         
     except Exception as e:
-        # Em um ambiente Streamlit, st.error seria usado. Para o módulo, apenas um print/log.
         print(f"Erro ao carregar dados do time (ID: {team_id}) para a temporada {SEASON}: {e}")
         return pd.DataFrame()
 
-# Adicionando uma função para carregar dados de jogador, caso o usuário queira analisar por jogador
 @st.cache_data
 def load_player_game_log(player_id):
     """
@@ -102,7 +97,6 @@ def get_available_stats_columns(df):
     return [col for col in stats_cols if col in df.columns]
 
 if __name__ == '__main__':
-    # Exemplo de uso para teste
     team_name = "Boston Celtics"
     team_id = get_team_id(team_name)
     

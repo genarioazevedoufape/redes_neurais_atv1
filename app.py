@@ -12,7 +12,7 @@ try:
     from utils.visualization import (
         plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
         plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
-        plot_feature_importance, plot_residuals  # Remover display_all_plots
+        plot_feature_importance, plot_residuals  
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
@@ -24,7 +24,7 @@ except ImportError:
     from utils.visualization import (
         plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
         plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
-        plot_feature_importance, plot_residuals  # Remover display_all_plots
+        plot_feature_importance, plot_residuals  
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
@@ -38,7 +38,6 @@ st.set_page_config(
 
 # --- Título Principal ---
 st.title("🏀 NBA Predictor: Análise Preditiva com Regressão")
-st.markdown("Desenvolvido para a temporada **2024-2025** usando `nba_api` e `Streamlit`.")
 
 # --- Sidebar para Entradas do Usuário ---
 st.sidebar.header("⚙️ Configurações da Análise")
@@ -268,48 +267,7 @@ if not df_raw.empty:
                     plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size), 
                     use_container_width=True
                 )
-                
-                # 7. Informações do Modelo
-                st.sidebar.markdown("---")
-                if st.sidebar.checkbox('📋 Mostrar Resumo Avançado (Statsmodels)'):
-                    st.header("🔬 Resumo Avançado do Modelo")
-                    st.subheader("📊 Estatísticas Detalhadas (Statsmodels)")
-                    st.components.v1.html(model.get_statsmodels_summary(), height=600, scrolling=True)
-                
-                # 8. Download dos Resultados
-                st.sidebar.markdown("---")
-                if st.sidebar.checkbox('💾 Exportar Resultados'):
-                    st.header("📥 Exportar Resultados")
-                    
-                    # Criar DataFrame com resultados
-                    results_df = pd.DataFrame({
-                        'Realidade': y_test,
-                        'Previsão': y_pred if regression_type == "Linear" else y_pred_class,
-                        'Probabilidade': y_pred_proba if regression_type == "Logística" else np.nan
-                    })
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Download dos dados de resultados
-                        csv = results_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Baixar Resultados (CSV)",
-                            data=csv,
-                            file_name=f"resultados_{selected_team_name}_{regression_type}.csv",
-                            mime="text/csv"
-                        )
-                    
-                    with col2:
-                        # Download das métricas
-                        metrics_csv = metrics_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Baixar Métricas (CSV)",
-                            data=metrics_csv,
-                            file_name=f"metricas_{selected_team_name}_{regression_type}.csv",
-                            mime="text/csv"
-                        )
-                    
+                                   
         except LinAlgError as e:
             if "singular matrix" in str(e).lower():
                 st.error("""
