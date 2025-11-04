@@ -1,7 +1,6 @@
 from matplotlib.pylab import LinAlgError
 import streamlit as st
 import pandas as pd
-import numpy as np
 import os
 import sys
 
@@ -11,8 +10,8 @@ try:
     from utils.preprocessing import prepare_data
     from utils.visualization import (
         plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
-        plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
-        plot_feature_importance, plot_residuals  
+        plot_trend_with_confidence, plot_roc_curve, plot_feature_importance,
+        plot_logistic_sigmoid_curve, plot_multiple_logistic_curves
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
@@ -23,8 +22,8 @@ except ImportError:
     from utils.preprocessing import prepare_data
     from utils.visualization import (
         plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
-        plot_trend_with_confidence, plot_roc_curve, plot_calibration_curve,
-        plot_feature_importance, plot_residuals  
+        plot_trend_with_confidence, plot_roc_curve, plot_feature_importance,
+        plot_logistic_sigmoid_curve, plot_multiple_logistic_curves
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
@@ -207,44 +206,44 @@ if not df_raw.empty:
                     df_coef = model.get_coefficients(x_cols)
                     st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
                 
-                # Equação da Regressão (apenas para Linear)
+                # Equação da Regressão
+                st.subheader("📐 Equação da Regressão")
                 if regression_type == "Linear":
-                    st.subheader("📐 Equação da Regressão")
                     st.code(model.get_equation(x_cols), language='markdown')
+                else:
+                    # Para regressão logística, usar a nova função se disponível
+                    if hasattr(model, 'get_logistic_equation'):
+                        st.code(model.get_logistic_equation(x_cols), language='markdown')
+                    else:
+                        st.info("Equação da regressão logística não disponível.")
                 
                 # 4. Visualizações Principais
                 st.header("📈 Visualizações")
                 
                 # Gráficos principais baseados no tipo de modelo
                 if regression_type == "Linear":
-                    st.subheader("🔍 Relações Individuais: Variáveis vs " + y_col)
+                    st.subheader("🔍 Diagrama de Dispersão com Linha de Regressão")
                     st.plotly_chart(
                         plot_regression_line(df_raw, x_cols, y_col), 
                         use_container_width=True
                     )
 
                     # Importância das Features
-                    st.subheader("🎯 Importância das Variáveis")
+                    st.subheader("🎯 Gráfico de Importância de Variáveis")
                     st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
                     
-                    # Os gráficos existentes continuam abaixo...
                     col1, col2 = st.columns(2)
                     
                     with col1:
                         st.subheader("📊 Previsão vs Realidade")
                         st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, regression_type), use_container_width=True)
-                    
-                    with col2:
-                        st.subheader("📉 Gráfico de Resíduos")
-                        st.plotly_chart(plot_residuals(y_test, y_pred, regression_type), use_container_width=True)
-                    
 
                 else:
                     # Gráficos para Regressão Logística
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.subheader("📊 Probabilidade de Vitória")
+                        st.subheader("📊 Gráfico de Probabilidades Previstas")
                         st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, regression_type), use_container_width=True)
                         
                     with col2:
@@ -258,15 +257,26 @@ if not df_raw.empty:
                         st.pyplot(plot_confusion_matrix(y_test, y_pred_class), use_container_width=True)
                         
                     with col4:
-                        st.subheader("⚖️ Curva de Calibração")
-                        st.plotly_chart(plot_calibration_curve(y_test, y_pred_proba), use_container_width=True)
+                        st.subheader("📊 Gráfico de Importância de Variáveis")
+                        st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
                     
-                    # Importância das Features
-                    st.subheader("📊 Importância das Variáveis")
-                    st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
-                
-                # 6. Análise de Tendência
-                st.subheader(f"📈 Tendência de {y_col} ao Longo do Tempo")
+                    # Diagrama de Dispersão para Regressão Logística
+                    st.subheader("🔍 Diagrama de Dispersão - Regressão Logística")
+                    st.plotly_chart(
+                        plot_multiple_logistic_curves(df_raw, x_cols, y_col, model=model), 
+                        use_container_width=True
+                    )
+                    
+                    if x_cols:
+                        st.subheader("🔄 Curva Sigmoide")
+                        example_var = x_cols[0]
+                        st.plotly_chart(
+                            plot_logistic_sigmoid_curve(df_raw, example_var, y_col, model=model), 
+                            use_container_width=True
+                        )
+
+                # 5. Análise de Tendência
+                st.subheader(f"📈 Gráfico de Tendência com Intervalo de Confiança")
                 st.plotly_chart(
                     plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size), 
                     use_container_width=True

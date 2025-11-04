@@ -89,3 +89,52 @@ class LogisticRegressionModel:
         if self.statsmodels_results:
             return self.statsmodels_results.summary().as_html()
         return "<p>Resumo do Statsmodels não disponível (possível problema de singularidade ou dados insuficientes).</p>"
+    
+    # Adicionar este método à classe LogisticRegressionModel
+
+    def get_logistic_equation(self, feature_cols: list) -> str:
+        """
+        Retorna a equação da regressão logística no formato:
+        p = 1 / [1 + e^(-(β0 + β1x1 + β2x2 + ...))]
+        """
+        if not hasattr(self.model, 'intercept_') or not hasattr(self.model, 'coef_'):
+            return "Modelo não treinado ainda."
+        
+        intercept = self.model.intercept_[0]
+        coefficients = self.model.coef_[0]
+        
+        # Construir a parte linear da equação
+        linear_combination = f"{intercept:.4f}"
+        
+        for i, col in enumerate(feature_cols):
+            coef = coefficients[i]
+            if coef >= 0:
+                linear_combination += f" + {coef:.4f}×{col}"
+            else:
+                linear_combination += f" - {abs(coef):.4f}×{col}"
+        
+        # Equação completa
+        equation = f"p = 1 / [1 + e^(-({linear_combination}))]"
+        
+        return equation
+
+    def get_odds_ratios(self, feature_cols: list) -> pd.DataFrame:
+        """
+        Retorna os odds ratios (e^β) para interpretação.
+        """
+        coefficients = self.model.coef_[0]
+        odds_ratios = np.exp(coefficients)
+        
+        data = {
+            'Variável': feature_cols,
+            'Coeficiente (β)': coefficients,
+            'Odds_Ratio (e^β)': odds_ratios,
+            'Interpretação': odds_ratios.apply(
+                lambda x: f"Aumenta {((x-1)*100):.1f}% a chance" if x > 1 
+                else f"Reduz {((1-x)*100):.1f}% a chance" if x < 1 
+                else "Sem efeito"
+            )
+        }
+        
+        return pd.DataFrame(data)
+    

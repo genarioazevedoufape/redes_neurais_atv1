@@ -6,7 +6,6 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, roc_curve, auc
-from sklearn.calibration import calibration_curve
 
 def plot_regression_line(df: pd.DataFrame, X_cols: list, y_col: str):
     """
@@ -89,168 +88,6 @@ def plot_regression_line(df: pd.DataFrame, X_cols: list, y_col: str):
     
     return fig
 
-def plot_logistic_relationships(df: pd.DataFrame, X_cols: list, y_col: str):
-    """
-    Gráfico adequado para visualizar relações em regressão logística.
-    Mostra a probabilidade estimada em função de cada variável independente.
-    """
-    if df.empty or not X_cols:
-        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
-
-    display_cols = X_cols[:4] if len(X_cols) > 4 else X_cols
-    rows = (len(display_cols) + 1) // 2
-    cols = 2 if len(display_cols) > 1 else 1
-    
-    fig = make_subplots(
-        rows=rows, 
-        cols=cols,
-        subplot_titles=[f"Probabilidade de Vitória vs {x_col}" for x_col in display_cols]
-    )
-    
-    for i, x_col in enumerate(display_cols):
-        row = (i // cols) + 1
-        col = (i % cols) + 1
-        
-        # Filtrar dados válidos
-        valid_data = df[[x_col, y_col]].dropna()
-        
-        if len(valid_data) > 1:
-            # Usar suavização para mostrar a tendência logística
-            try:
-                # Agrupar por bins da variável X e calcular média de Y (probabilidade)
-                valid_data['bin'] = pd.cut(valid_data[x_col], bins=8)
-                bin_stats = valid_data.groupby('bin').agg({
-                    x_col: 'mean', 
-                    y_col: ['mean', 'count']
-                }).reset_index()
-                
-                # Flatten column names
-                bin_stats.columns = ['bin', f'{x_col}_mean', 'win_prob', 'count']
-                bin_stats = bin_stats[bin_stats['count'] > 1]  # Remover bins com poucos dados
-                
-                if len(bin_stats) > 1:
-                    # Linha de tendência logística (probabilidade média por bin)
-                    line = go.Scatter(
-                        x=bin_stats[f'{x_col}_mean'],
-                        y=bin_stats['win_prob'],
-                        mode='lines+markers',
-                        name='Tendência',
-                        line=dict(color='red', width=3),
-                        marker=dict(size=8, color='red'),
-                        showlegend=False
-                    )
-                    fig.add_trace(line, row=row, col=col)
-                
-                # Scatter plot dos dados originais (com jitter para evitar sobreposição)
-                np.random.seed(42)  # Para reproducibilidade
-                scatter = go.Scatter(
-                    x=valid_data[x_col] + np.random.normal(0, 0.01, len(valid_data)),  # pequeno jitter
-                    y=valid_data[y_col] + np.random.normal(0, 0.02, len(valid_data)),
-                    mode='markers',
-                    name='Dados',
-                    showlegend=False,
-                    marker=dict(
-                        size=6, 
-                        opacity=0.4, 
-                        color=valid_data[y_col].map({0: 'red', 1: 'green'}),
-                        line=dict(width=0.5, color='DarkSlateGrey')
-                    )
-                )
-                fig.add_trace(scatter, row=row, col=col)
-                
-            except Exception as e:
-                # Fallback: scatter plot simples
-                scatter = go.Scatter(
-                    x=valid_data[x_col],
-                    y=valid_data[y_col],
-                    mode='markers',
-                    name=f'{x_col}',
-                    showlegend=False,
-                    marker=dict(
-                        size=8, 
-                        opacity=0.7,
-                        color=valid_data[y_col].map({0: 'red', 1: 'green'})
-                    )
-                )
-                fig.add_trace(scatter, row=row, col=col)
-            
-            fig.update_xaxes(title_text=x_col, row=row, col=col)
-            fig.update_yaxes(
-                title_text='Prob. Vitória', 
-                row=row, col=col,
-                tickvals=[0, 0.5, 1],
-                range=[-0.1, 1.1]
-            )
-        else:
-            # Adicionar mensagem de dados insuficientes
-            fig.add_annotation(
-                text="Dados insuficientes",
-                xref=f"x{i+1}", yref=f"y{i+1}",
-                x=0.5, y=0.5, showarrow=False,
-                row=row, col=col
-            )
-    
-    fig.update_layout(
-        height=400 * rows,
-        title_text="Relações para Regressão Logística - Probabilidade de Vitória",
-        showlegend=False,
-        template="plotly_white"
-    )
-    
-    return fig
-
-def plot_logistic_density(df: pd.DataFrame, X_cols: list, y_col: str):
-    """
-    Mostra a distribuição das variáveis contínuas separadas por resultado (vitória/derrota).
-    """
-    if df.empty or not X_cols:
-        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
-        
-    display_cols = X_cols[:4] if len(X_cols) > 4 else X_cols
-    
-    fig = make_subplots(
-        rows=len(display_cols), 
-        cols=1,
-        subplot_titles=[f"Distribuição de {x_col} por Resultado" for x_col in display_cols]
-    )
-    
-    for i, x_col in enumerate(display_cols):
-        row = i + 1
-        
-        # Dados para vitórias e derrotas
-        wins = df[df[y_col] == 1][x_col].dropna()
-        losses = df[df[y_col] == 0][x_col].dropna()
-        
-        if len(wins) > 0 and len(losses) > 0:
-            # Box plot para comparar distribuições
-            fig.add_trace(
-                go.Box(
-                    y=wins, 
-                    name='Vitórias', 
-                    marker_color='lightgreen',
-                    boxpoints='outliers'
-                ), 
-                row=row, col=1
-            )
-            fig.add_trace(
-                go.Box(
-                    y=losses, 
-                    name='Derrotas', 
-                    marker_color='lightcoral',
-                    boxpoints='outliers'
-                ), 
-                row=row, col=1
-            )
-    
-    fig.update_layout(
-        height=300 * len(display_cols),
-        title_text="Distribuição das Variáveis por Resultado do Jogo",
-        template="plotly_white",
-        showlegend=False
-    )
-    
-    return fig
-
 def plot_prediction_vs_reality(y_true: pd.Series, y_pred: np.ndarray, model_type: str):
     """
     Gera um Gráfico de Previsão vs. Realidade (Plotly).
@@ -281,7 +118,7 @@ def plot_prediction_vs_reality(y_true: pd.Series, y_pred: np.ndarray, model_type
             y='Previsão',
             color=df['Realidade'].astype(str),
             color_discrete_map={'0': 'red', '1': 'green'},
-            title='Probabilidade de Vitória (Regressão Logística)',
+            title='Gráfico de Probabilidades Previstas',
             labels={'Índice': 'Sequência de Jogos', 'Previsão': 'Probabilidade de Vitória', 'color': 'Resultado Real'},
             template="plotly_white"
         )
@@ -379,7 +216,7 @@ def plot_trend_with_confidence(df: pd.DataFrame, date_col: str, y_col: str, wind
         )
     
     fig.update_layout(
-        title=f"Tendência de {y_col} ao longo do tempo com Intervalo de Confiança",
+        title=f"Gráfico de Tendência com Intervalo de Confiança",
         xaxis_title='Data do Jogo',
         yaxis_title=y_col,
         template="plotly_white",
@@ -434,44 +271,6 @@ def plot_roc_curve(y_true: pd.Series, y_pred_proba: np.ndarray):
     
     return fig
 
-def plot_calibration_curve(y_true: pd.Series, y_pred_proba: np.ndarray, n_bins: int = 10):
-    """
-    Gera gráfico de calibração para verificar se as probabilidades estão bem calibradas.
-    """
-    prob_true, prob_pred = calibration_curve(y_true, y_pred_proba, n_bins=n_bins)
-    
-    fig = go.Figure()
-    
-    # Curva de calibração
-    fig.add_trace(go.Scatter(
-        x=prob_pred, y=prob_true,
-        mode='lines+markers',
-        name='Curva de Calibração',
-        line=dict(color='blue', width=3),
-        marker=dict(size=8)
-    ))
-    
-    # Linha de referência (calibração perfeita)
-    fig.add_trace(go.Scatter(
-        x=[0, 1], y=[0, 1],
-        mode='lines',
-        name='Calibração Perfeita',
-        line=dict(color='red', width=2, dash='dash')
-    ))
-    
-    fig.update_layout(
-        title='Curva de Calibração das Probabilidades',
-        xaxis_title='Probabilidade Prevista Média',
-        yaxis_title='Fração de Positivos',
-        template="plotly_white",
-        showlegend=True
-    )
-    
-    fig.update_xaxes(range=[0, 1])
-    fig.update_yaxes(range=[0, 1])
-    
-    return fig
-
 def plot_feature_importance(coef: np.ndarray, feature_names: list, model_type: str = 'Logística'):
     """
     Gera gráfico de importância das features baseado nos coeficientes.
@@ -486,7 +285,7 @@ def plot_feature_importance(coef: np.ndarray, feature_names: list, model_type: s
         x='Importance',
         y='Feature',
         orientation='h',
-        title=f'Importância das Variáveis (Regressão {model_type})',
+        title=f'Gráfico de Importância de Variáveis',
         color='Importance',
         color_continuous_scale='Blues'
     )
@@ -500,30 +299,223 @@ def plot_feature_importance(coef: np.ndarray, feature_names: list, model_type: s
     
     return fig
 
-def plot_residuals(y_true: pd.Series, y_pred: np.ndarray, model_type: str):
+def plot_logistic_sigmoid_curve(df: pd.DataFrame, x_col: str, y_col: str, model=None):
     """
-    Gera gráfico de resíduos para análise de regressão linear.
+    Gráfico da curva sigmoide para regressão logística para UMA variável específica.
+    Mostra a relação não-linear entre a variável e a probabilidade de vitória.
     """
-    residuals = y_true - y_pred
+    if df.empty or not x_col:
+        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
+
+    # Filtrar dados válidos
+    valid_data = df[[x_col, y_col]].dropna()
+    
+    if len(valid_data) < 2:
+        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
     
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(
-        x=y_pred,
-        y=residuals,
-        mode='markers',
-        name='Resíduos',
-        marker=dict(size=8, opacity=0.7, color='blue')
-    ))
+    # Scatter plot dos dados reais (com jitter para melhor visualização)
+    np.random.seed(42)
+    jitter_y = valid_data[y_col] + np.random.normal(0, 0.02, len(valid_data))
+    jitter_x = valid_data[x_col] + np.random.normal(0, 0.01, len(valid_data))
     
-    # Linha de referência em y=0
-    fig.add_hline(y=0, line_dash="dash", line_color="red")
+    scatter = go.Scatter(
+        x=jitter_x,
+        y=jitter_y,
+        mode='markers',
+        name='Dados Reais',
+        marker=dict(
+            size=8,
+            opacity=0.6,
+            color=valid_data[y_col].map({0: 'red', 1: 'green'}),
+            line=dict(width=1, color='black')
+        )
+    )
+    fig.add_trace(scatter)
+    
+    # CALCULAR E PLOTAR A CURVA SIGMOIDE
+    if model is not None and hasattr(model, 'model'):
+        try:
+            # Obter coeficientes do modelo
+            intercept = model.model.intercept_[0]
+            coefficients = model.model.coef_[0]
+            
+            # Encontrar o índice da variável atual no modelo
+            feature_names = list(model.model.feature_names_in_) if hasattr(model.model, 'feature_names_in_') else []
+            if x_col in feature_names:
+                coef_index = feature_names.index(x_col)
+                coef_value = coefficients[coef_index]
+                
+                # Criar range de valores para a variável
+                x_range = np.linspace(valid_data[x_col].min(), valid_data[x_col].max(), 100)
+                
+                mean_x = valid_data[x_col].mean()
+                std_x = valid_data[x_col].std()
+                x_range_scaled = (x_range - mean_x) / std_x
+
+                z = intercept + coef_value * x_range_scaled
+                
+                # Aplicar função sigmoide: p = 1 / (1 + e^(-z))
+                probabilities = 1 / (1 + np.exp(-z))
+                
+                # Plotar curva sigmoide
+                sigmoid_curve = go.Scatter(
+                    x=x_range,
+                    y=probabilities,
+                    mode='lines',
+                    name='Curva Sigmoide',
+                    line=dict(color='blue', width=3),
+                    hovertemplate='<b>%{x:.1f} ' + x_col + '</b><br>Probabilidade: %{y:.3f}<extra></extra>'
+                )
+                fig.add_trace(sigmoid_curve)
+                
+            else:
+                # Fallback: calcular regressão logística simples com statsmodels
+                import statsmodels.api as sm
+                X_simple = valid_data[[x_col]]
+                X_simple = sm.add_constant(X_simple)
+                y_simple = valid_data[y_col]
+                
+                logit_model = sm.Logit(y_simple, X_simple)
+                result = logit_model.fit(disp=False)
+                
+                # Calcular curva sigmoide
+                x_range = np.linspace(valid_data[x_col].min(), valid_data[x_col].max(), 100)
+                X_pred = sm.add_constant(x_range)
+                probabilities = result.predict(X_pred)
+                
+                sigmoid_curve = go.Scatter(
+                    x=x_range,
+                    y=probabilities,
+                    mode='lines',
+                    name='Curva Sigmoide (Simples)',
+                    line=dict(color='blue', width=3),
+                    hovertemplate='<b>%{x:.1f} ' + x_col + '</b><br>Probabilidade: %{y:.3f}<extra></extra>'
+                )
+                fig.add_trace(sigmoid_curve)
+                
+        except Exception as e:
+            print(f"Erro ao calcular curva sigmoide: {e}")
+            # Adicionar mensagem no gráfico
+            fig.add_annotation(
+                text=f"Erro na curva: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                bgcolor="white"
+            )
+    
+    # Linha de threshold
+    fig.add_hline(y=0.5, line_dash="dash", line_color="red", 
+                 annotation_text="Threshold 0.5")
+    
+    fig.update_xaxes(title_text=x_col)
+    fig.update_yaxes(title_text='Probabilidade de Vitória', range=[-0.1, 1.1])
     
     fig.update_layout(
-        title=f'Gráfico de Resíduos (Regressão {model_type})',
-        xaxis_title='Valores Preditos',
-        yaxis_title='Resíduos (Real - Previsto)',
-        template="plotly_white"
+        height=500,
+        title_text=f"Curva Sigmoide: Probabilidade de Vitória vs {x_col}",
+        template="plotly_white",
+        showlegend=True
+    )
+    
+    return fig
+
+def plot_multiple_logistic_curves(df: pd.DataFrame, X_cols: list, y_col: str, model=None):
+    """
+    Gera múltiplos gráficos de curva sigmoide para diferentes variáveis.
+    """
+    if df.empty or not X_cols:
+        return go.Figure().add_annotation(text="Dados insuficientes para o gráfico.")
+
+    # Selecionar até 4 variáveis para não sobrecarregar
+    display_cols = X_cols[:4] if len(X_cols) > 4 else X_cols
+    rows = (len(display_cols) + 1) // 2
+    cols = 2 if len(display_cols) > 1 else 1
+    
+    fig = make_subplots(
+        rows=rows, 
+        cols=cols,
+        subplot_titles=[f"Probabilidade vs {x_col}" for x_col in display_cols]
+    )
+    
+    for i, x_col in enumerate(display_cols):
+        row = (i // cols) + 1
+        col = (i % cols) + 1
+        
+        # Filtrar dados válidos
+        valid_data = df[[x_col, y_col]].dropna()
+        
+        if len(valid_data) > 1:
+            # Scatter plot dos dados reais (com jitter)
+            np.random.seed(42)
+            jitter_y = valid_data[y_col] + np.random.normal(0, 0.02, len(valid_data))
+            jitter_x = valid_data[x_col] + np.random.normal(0, 0.01, len(valid_data))
+            
+            scatter = go.Scatter(
+                x=jitter_x,
+                y=jitter_y,
+                mode='markers',
+                name=f'Dados {x_col}',
+                marker=dict(
+                    size=6,
+                    opacity=0.6,
+                    color=valid_data[y_col].map({0: 'red', 1: 'green'}),
+                    line=dict(width=0.5, color='black')
+                ),
+                showlegend=False
+            )
+            fig.add_trace(scatter, row=row, col=col)
+            
+            # TENTAR ADICIONAR CURVA SIGMOIDE PARA CADA VARIÁVEL
+            if model is not None and hasattr(model, 'model'):
+                try:
+                    # Obter coeficientes
+                    intercept = model.model.intercept_[0]
+                    coefficients = model.model.coef_[0]
+                    
+                    # Encontrar índice da variável
+                    feature_names = list(model.model.feature_names_in_) if hasattr(model.model, 'feature_names_in_') else []
+                    if x_col in feature_names:
+                        coef_index = feature_names.index(x_col)
+                        coef_value = coefficients[coef_index]
+                        
+                        # Calcular curva sigmoide
+                        x_range = np.linspace(valid_data[x_col].min(), valid_data[x_col].max(), 100)
+
+                        mean_x = valid_data[x_col].mean()
+                        std_x = valid_data[x_col].std()
+                        x_range_scaled = (x_range - mean_x) / std_x
+
+                        z = intercept + coef_value * x_range ** x_range_scaled
+                        probabilities = 1 / (1 + np.exp(-z))
+                        
+                        # Adicionar curva ao subplot
+                        curve = go.Scatter(
+                            x=x_range,
+                            y=probabilities,
+                            mode='lines',
+                            name=f'Curva {x_col}',
+                            line=dict(color='blue', width=2),
+                            showlegend=False
+                        )
+                        fig.add_trace(curve, row=row, col=col)
+                except Exception as e:
+                    print(f"Erro na curva para {x_col}: {e}")
+            
+            # Linha de threshold
+            fig.add_hline(y=0.5, line_dash="dash", line_color="red", 
+                         row=row, col=col)
+            
+            fig.update_xaxes(title_text=x_col, row=row, col=col)
+            fig.update_yaxes(title_text='Prob. Vitória', 
+                           row=row, col=col, range=[-0.1, 1.1])
+    
+    fig.update_layout(
+        height=400 * rows,
+        title_text="Diagrama de Dispersão com Curvas Sigmoides - Regressão Logística",
+        template="plotly_white",
+        showlegend=False
     )
     
     return fig
