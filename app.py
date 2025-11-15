@@ -15,6 +15,7 @@ try:
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
+    from models.mlp_model import MLPModel
 except ImportError:
     # Se a importação falhar, tentamos adicionar o diretório pai (onde os módulos estão)
     sys.path.append(os.path.dirname(__file__))
@@ -27,6 +28,7 @@ except ImportError:
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
+    from models.mlp_model import MLPModel
 
 # --- Configuração da Página ---
 st.set_page_config(
@@ -44,7 +46,7 @@ st.sidebar.header("⚙️ Configurações da Análise")
 # 1. Selecionar o tipo de regressão
 regression_type = st.sidebar.radio(
     "1. Selecione o Tipo de Regressão:",
-    ("Linear", "Logística")
+    ("Linear", "Logística", "MLP (Rede Neural)") 
 )
 
 # 2. Escolher equipe
@@ -89,13 +91,13 @@ if not df_raw.empty:
     y_options = available_stats
     
     # Regressão Logística deve ter 'WIN' como variável dependente
-    if regression_type == "Logística":
+    if regression_type == "Logística" or regression_type == "MLP (Rede Neural)": 
         if 'WIN' not in y_options:
             st.error("A Regressão Logística requer uma variável binária (como 'WIN'). Dados insuficientes.")
             y_col = None
         else:
             y_col = 'WIN'
-            st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota) - **Fixa para Logística**")
+            st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota) - **Fixa para {regression_type}**")
     else:
         # Regressão Linear: permite escolher
         linear_options = [col for col in y_options if col not in ['WIN', 'GAME_DATE']]
@@ -146,9 +148,9 @@ if not df_raw.empty:
         help="Número de jogos para calcular a média móvel"
     )
     
-    # Threshold para classificação (apenas logística)
-    if regression_type == "Logística":
-        threshold = st.sidebar.slider(
+    # Threshold para classificação (Logística e MLP)
+if regression_type == "Logística" or regression_type == "MLP (Rede Neural)": 
+    threshold = st.sidebar.slider(
             "Threshold de Classificação:",
             min_value=0.1,
             max_value=0.9,
@@ -186,12 +188,47 @@ if not df_raw.empty:
                     y_pred = model.predict(X_test)
                     metrics = model.evaluate(y_test, y_pred)
                     
-                else: # Logística
+                elif regression_type == "Logística":
                     model = LogisticRegressionModel()
                     model.train(X_train, y_train)
                     y_pred_proba = model.predict_proba(X_test)
                     y_pred_class = model.predict_class(X_test, threshold=threshold)
                     metrics = model.evaluate(y_test, y_pred_class, y_pred_proba)
+                
+                elif regression_type == "MLP (Rede Neural)":
+                    
+                    # O número de neurônios de entrada é o número de colunas X
+                    input_dim = len(X_train.columns) 
+                    
+                    model = MLPModel(input_dim=input_dim)
+                    
+                    model.build_model(
+                        optimizer_name='Adam', 
+                        activation='relu',     
+                        hidden_layers=1,       
+                        neurons=32             
+                    )
+                    
+                    st.info(f"Treinando a MLP (Input={input_dim} neurônios). Isso pode levar um momento...")
+                    
+                    model.train(
+                        X_train, 
+                        y_train, 
+                        epochs=100, 
+                        validation_split=0.2 
+                    )
+                    st.success("Modelo MLP treinado!")
+                    
+                    # Obter previsões
+                    y_pred_proba = model.predict_proba(X_test)
+                    y_pred_class = model.predict_class(X_test, threshold=threshold)
+                    
+                    metrics = model.evaluate(y_test, y_pred_class, y_pred_proba) 
+                    
+                    # Exibir o resumo do modelo 
+                    st.subheader("Arquitetura da Rede (Relatório)")
+                    st.code(model.get_summary(), language='text')
+                
                     
                 # 3. Exibição de Métricas e Coeficientes
                 col1, col2 = st.columns(2)
@@ -202,20 +239,30 @@ if not df_raw.empty:
                     st.dataframe(metrics_df.style.format({'Valor': "{:.4f}"}), hide_index=True)
                 
                 with col2:
-                    st.subheader("🔢 Coeficientes da Regressão (β)")
-                    df_coef = model.get_coefficients(x_cols)
-                    st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
+                    # MLP não tem coeficientes, então mostramos o gráfico de erro
+                    if regression_type != "MLP (Rede Neural)":
+                        st.subheader("🔢 Coeficientes da Regressão (β)")
+                        df_coef = model.get_coefficients(x_cols)
+                        st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
+                    else:
+                        
+                        st.subheader("📈 Histórico de Treinamento (Evolução do Erro)")
+                        history_df = model.get_history_df()
+                        if not history_df.empty:
+                            st.line_chart(history_df[['loss', 'val_loss']])
+                            st.write("Azul (loss): Erro nos dados de treino.")
+                            st.write("Laranja (val_loss): Erro nos dados de validação.")
                 
                 # Equação da Regressão
-                st.subheader("📐 Equação da Regressão")
-                if regression_type == "Linear":
-                    st.code(model.get_equation(x_cols), language='markdown')
-                else:
-                    # Para regressão logística, usar a nova função se disponível
-                    if hasattr(model, 'get_logistic_equation'):
-                        st.code(model.get_logistic_equation(x_cols), language='markdown')
+                if regression_type != "MLP (Rede Neural)":
+                    st.subheader("📐 Equação da Regressão")
+                    if regression_type == "Linear":
+                        st.code(model.get_equation(x_cols), language='markdown')
                     else:
-                        st.info("Equação da regressão logística não disponível.")
+                        if hasattr(model, 'get_logistic_equation'):
+                            st.code(model.get_logistic_equation(x_cols), language='markdown')
+                        else:
+                            st.info("Equação da regressão logística não disponível.")
                 
                 # 4. Visualizações Principais
                 st.header("📈 Visualizações")
@@ -227,24 +274,21 @@ if not df_raw.empty:
                         plot_regression_line(df_raw, x_cols, y_col), 
                         use_container_width=True
                     )
-
-                    # Importância das Features
                     st.subheader("🎯 Gráfico de Importância de Variáveis")
                     st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
                     
                     col1, col2 = st.columns(2)
-                    
                     with col1:
                         st.subheader("📊 Previsão vs Realidade")
                         st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, regression_type), use_container_width=True)
 
                 else:
-                    # Gráficos para Regressão Logística
+                    # Gráficos para Regressão Logística E MLP 
                     col1, col2 = st.columns(2)
                     
                     with col1:
                         st.subheader("📊 Gráfico de Probabilidades Previstas")
-                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, regression_type), use_container_width=True)
+                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, "Logística"), use_container_width=True)
                         
                     with col2:
                         st.subheader("📈 Curva ROC")
@@ -257,23 +301,27 @@ if not df_raw.empty:
                         st.pyplot(plot_confusion_matrix(y_test, y_pred_class), use_container_width=True)
                         
                     with col4:
-                        st.subheader("📊 Gráfico de Importância de Variáveis")
-                        st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
+                        # Gráfico de importância só funciona para Logística (coeficientes)
+                        if regression_type == "Logística":
+                            st.subheader("📊 Gráfico de Importância de Variáveis")
+                            st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
+                        else:
+                            st.write("Gráfico de importância de variáveis (baseado em coeficientes) não se aplica diretamente a MLPs.")
                     
-                    # Diagrama de Dispersão para Regressão Logística
-                    st.subheader("🔍 Diagrama de Dispersão - Regressão Logística")
-                    st.plotly_chart(
-                        plot_multiple_logistic_curves(df_raw, x_cols, y_col, model=model), 
-                        use_container_width=True
-                    )
-                    
-                    if x_cols:
-                        st.subheader("🔄 Curva Sigmoide")
-                        example_var = x_cols[0]
+                    # Gráficos de curva sigmoide (só para Logística)
+                    if regression_type == "Logística":
+                        st.subheader("🔍 Diagrama de Dispersão - Regressão Logística")
                         st.plotly_chart(
-                            plot_logistic_sigmoid_curve(df_raw, example_var, y_col, model=model), 
+                            plot_multiple_logistic_curves(df_raw, x_cols, y_col, model=model), 
                             use_container_width=True
                         )
+                        if x_cols:
+                            st.subheader("🔄 Curva Sigmoide")
+                            example_var = x_cols[0]
+                            st.plotly_chart(
+                                plot_logistic_sigmoid_curve(df_raw, example_var, y_col, model=model), 
+                                use_container_width=True
+                            )
 
                 # 5. Análise de Tendência
                 st.subheader(f"📈 Gráfico de Tendência com Intervalo de Confiança")
