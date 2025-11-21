@@ -33,8 +33,9 @@ def prepare_data(df: pd.DataFrame, target_col: str, feature_cols: list, test_siz
     
     # 4. Divisão em Treino e Teste
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y if len(y.unique()) == 2 else None
+        X, y, test_size=test_size, shuffle=False
     )
+
     
     # 5. Escalonamento dos Features
     scaler = StandardScaler()

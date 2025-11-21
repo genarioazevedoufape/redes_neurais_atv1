@@ -1,369 +1,474 @@
-from matplotlib.pylab import LinAlgError
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 import os
 import sys
 
-# Adicionar o diretório raiz do projeto ao path para importação modular
+from data.nba_data_loader import load_player_game_log
+from utils.visualization import plot_player_ranking, plot_rolling_performance, plot_team_vs_opponent
+
+# ------------------------------------------------------------------
+# IMPORTAÇÕES (com fallback caso rode fora da estrutura de pastas)
+# ------------------------------------------------------------------
 try:
     from data.nba_data_loader import get_available_teams, get_team_id, load_team_game_log, get_available_stats_columns
     from utils.preprocessing import prepare_data
     from utils.visualization import (
-        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
+        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix,
         plot_trend_with_confidence, plot_roc_curve, plot_feature_importance,
-        plot_logistic_sigmoid_curve, plot_multiple_logistic_curves
+        plot_multiple_logistic_curves, plot_logistic_sigmoid_curve,
+        # --- NOVOS GRÁFICOS DA MLP ---
+        plot_mlp_prediction_vs_reality, plot_training_history_smoothed,
+        plot_probability_histogram, plot_predicted_vs_actual_scatter,
+        plot_bootstrap_confidence, plot_model_comparison_timeline
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
     from models.mlp_model import MLPModel
 except ImportError:
-    # Se a importação falhar, tentamos adicionar o diretório pai (onde os módulos estão)
     sys.path.append(os.path.dirname(__file__))
     from data.nba_data_loader import get_available_teams, get_team_id, load_team_game_log, get_available_stats_columns
     from utils.preprocessing import prepare_data
     from utils.visualization import (
-        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix, 
+        plot_regression_line, plot_prediction_vs_reality, plot_confusion_matrix,
         plot_trend_with_confidence, plot_roc_curve, plot_feature_importance,
-        plot_logistic_sigmoid_curve, plot_multiple_logistic_curves
+        plot_multiple_logistic_curves, plot_logistic_sigmoid_curve,
+        plot_mlp_prediction_vs_reality, plot_training_history_smoothed,
+        plot_probability_histogram, plot_predicted_vs_actual_scatter,
+        plot_bootstrap_confidence, plot_model_comparison_timeline
     )
     from models.linear_regression_model import LinearRegressionModel
     from models.logistic_regression_model import LogisticRegressionModel
     from models.mlp_model import MLPModel
 
-# --- Configuração da Página ---
+# ------------------------------------------------------------------
+# CONFIGURAÇÃO DA PÁGINA
+# ------------------------------------------------------------------
 st.set_page_config(
-    page_title="NBA Predictor: Regressão Linear e Logística",
+    page_title="NBA Predictor Pro",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- Título Principal ---
-st.title("🏀 NBA Predictor: Análise Preditiva com Regressão")
+st.title("NBA Predictor Pro: Regressão Linear • Logística • Rede Neural (MLP)")
 
-# --- Sidebar para Entradas do Usuário ---
-st.sidebar.header("⚙️ Configurações da Análise")
+# ------------------------------------------------------------------
+# INICIALIZAÇÃO DO SESSION STATE
+# ------------------------------------------------------------------
+if 'analysis_complete' not in st.session_state:
+    st.session_state.analysis_complete = False
+if 'player_data_loaded' not in st.session_state:
+    st.session_state.player_data_loaded = False
+if 'df_players_agg' not in st.session_state:
+    st.session_state.df_players_agg = None
+if 'df_players_games' not in st.session_state:
+    st.session_state.df_players_games = None
+if 'selected_metric' not in st.session_state:
+    st.session_state.selected_metric = 'PTS_mean'
+if 'top_n' not in st.session_state:
+    st.session_state.top_n = 10
 
-# 1. Selecionar o tipo de regressão
+# ------------------------------------------------------------------
+# SIDEBAR
+# ------------------------------------------------------------------
+st.sidebar.header("Configurações da Análise")
+
 regression_type = st.sidebar.radio(
-    "1. Selecione o Tipo de Regressão:",
-    ("Linear", "Logística", "MLP (Rede Neural)") 
+    "Tipo de Modelo:",
+    ("Regressão Linear", "Regressão Logística", "MLP (Rede Neural)")
 )
 
-# 2. Escolher equipe
 team_list = get_available_teams()
 selected_team_name = st.sidebar.selectbox(
-    "2. Escolha a Equipe:",
+    "Escolha a Equipe:",
     options=team_list,
     index=team_list.index("Boston Celtics") if "Boston Celtics" in team_list else 0
 )
 
-# 3. Carregar dados
 team_id = get_team_id(selected_team_name)
 df_raw = pd.DataFrame()
 
 if team_id:
-    data_load_state = st.info(f"Carregando dados de jogos do **{selected_team_name}**...")
-    try:
-        df_raw = load_team_game_log(team_id)
-        if not df_raw.empty:
-            data_load_state.success("Dados carregados com sucesso!")
-        else:
-            data_load_state.warning("Nenhum dado encontrado para a temporada 2024-2025. Tentando carregar dados de exemplo.")
-            st.warning("A `nba_api` pode não ter dados para a temporada 2024-2025 ainda. A análise pode falhar.")
-            
-    except Exception as e:
-        data_load_state.error(f"Erro ao carregar dados: {e}")
-else:
-    st.error("Time não encontrado. Por favor, selecione um time válido.")
-
-# Verificar se os dados foram carregados
-if not df_raw.empty:
-    
-    # Exibir dados brutos (opcional)
-    if st.sidebar.checkbox('Mostrar Dados Brutos'):
-        st.subheader(f"Dados Brutos de Jogos do {selected_team_name}")
-        st.dataframe(df_raw)
-        
-    # Colunas de estatísticas disponíveis para seleção de X e Y
-    available_stats = get_available_stats_columns(df_raw)
-    
-    # 4. Escolher variável dependente (Y)
-    y_options = available_stats
-    
-    # Regressão Logística deve ter 'WIN' como variável dependente
-    if regression_type == "Logística" or regression_type == "MLP (Rede Neural)": 
-        if 'WIN' not in y_options:
-            st.error("A Regressão Logística requer uma variável binária (como 'WIN'). Dados insuficientes.")
-            y_col = None
-        else:
-            y_col = 'WIN'
-            st.sidebar.markdown(f"**3. Variável Dependente (Y):** `WIN` (Vitória/Derrota) - **Fixa para {regression_type}**")
-    else:
-        # Regressão Linear: permite escolher
-        linear_options = [col for col in y_options if col not in ['WIN', 'GAME_DATE']]
-        if not linear_options:
-            st.error("Não há variáveis numéricas disponíveis para Regressão Linear.")
-            y_col = None
-        else:
-            y_col = st.sidebar.selectbox(
-                "3. Escolha a Variável Dependente (Y):",
-                options=linear_options,
-                index=linear_options.index('PTS') if 'PTS' in linear_options else 0
-            )
-    
-    # 5. Selecionar variáveis independentes (X)
-    x_options = [col for col in available_stats if col not in [y_col, 'GAME_DATE']]
-    
-    # Garantir que Logística não use 'WIN' em X
-    if regression_type == "Logística" and 'WIN' in x_options:
-        x_options.remove('WIN')
-        
-    x_cols = st.sidebar.multiselect(
-        "4. Selecione as Variáveis Independentes (X):",
-        options=x_options,
-        default=x_options[:3] if len(x_options) >= 3 else x_options
-    )
-    
-    # Configurações avançadas
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔧 Configurações Avançadas")
-    
-    # Tamanho do conjunto de teste
-    test_size = st.sidebar.slider(
-        "Tamanho do Conjunto de Teste:",
-        min_value=0.1,
-        max_value=0.5,
-        value=0.2,
-        step=0.05,
-        help="Proporção dos dados que serão usados para teste"
-    )
-    
-    # Janela para média móvel
-    window_size = st.sidebar.slider(
-        "Janela da Média Móvel:",
-        min_value=3,
-        max_value=10,
-        value=5,
-        step=1,
-        help="Número de jogos para calcular a média móvel"
-    )
-    
-    # Threshold para classificação (Logística e MLP)
-if regression_type == "Logística" or regression_type == "MLP (Rede Neural)": 
-    threshold = st.sidebar.slider(
-            "Threshold de Classificação:",
-            min_value=0.1,
-            max_value=0.9,
-            value=0.5,
-            step=0.05,
-            help="Probabilidade mínima para classificar como vitória"
-        )
-    
-    # 6. Botão de Execução
-    st.sidebar.markdown("---")
-    run_analysis = st.sidebar.button("▶️ Executar Análise")
-    
-    # --- Lógica Principal da Análise ---
-    if run_analysis and y_col and x_cols:
-        
-        st.header(f"Resultados da Análise de Regressão {regression_type}")
-        st.subheader(f"Previsão de **{y_col}** usando {len(x_cols)} variáveis")
-        
+    with st.spinner(f"Carregando jogos do {selected_team_name}..."):
         try:
-            # 1. Pré-processamento e Divisão de Dados
+            df_raw = load_team_game_log(team_id)
+            if not df_raw.empty:
+                st.success("Dados carregados com sucesso!")
+            else:
+                st.warning("Sem dados recentes. Usando cache ou exemplo.")
+        except Exception as e:
+            st.error(f"Erro ao carregar dados: {e}")
+
+if df_raw.empty:
+    st.info("Selecione uma equipe para começar.")
+    st.stop()
+
+# Mostrar dados brutos (opcional)
+if st.sidebar.checkbox("Mostrar dados brutos"):
+    st.subheader("Dados Brutos")
+    st.dataframe(df_raw)
+
+available_stats = get_available_stats_columns(df_raw)
+
+# Variável dependente (Y)
+if regression_type in ["Regressão Logística", "MLP (Rede Neural)"]:
+    if 'WIN' not in available_stats:
+        st.error("Coluna 'WIN' não encontrada. Não é possível treinar classificação.")
+        st.stop()
+    y_col = 'WIN'
+    st.sidebar.markdown("**Variável Dependente (Y):** `WIN` (Vitória = 1)")
+else:
+    linear_options = [col for col in available_stats if col not in ['WIN', 'GAME_DATE']]
+    y_col = st.sidebar.selectbox("Variável Dependente (Y):", linear_options, index=linear_options.index('PTS') if 'PTS' in linear_options else 0)
+
+# Variáveis independentes (X)
+x_options = [col for col in available_stats if col not in [y_col, 'GAME_DATE']]
+x_cols = st.sidebar.multiselect(
+    "Variáveis Independentes (X):",
+    options=x_options,
+    default=x_options[:5] if len(x_options) >= 5 else x_options
+)
+
+if not x_cols:
+    st.warning("Selecione pelo menos uma variável independente.")
+    st.stop()
+
+# Configurações avançadas
+st.sidebar.markdown("---")
+test_size = st.sidebar.slider("Tamanho do conjunto de teste:", 0.1, 0.5, 0.2, 0.05)
+window_size = st.sidebar.slider("Janela da média móvel:", 3, 10, 5)
+
+if regression_type != "Regressão Linear":
+    threshold = st.sidebar.slider("Threshold de classificação:", 0.1, 0.9, 0.5, 0.05)
+
+run_analysis = st.sidebar.button("Executar Análise", type="primary")
+
+# ------------------------------------------------------------------
+# EXECUÇÃO DA ANÁLISE
+# ------------------------------------------------------------------
+if run_analysis or st.session_state.analysis_complete:
+    
+    # Se é uma nova análise, executa o processamento completo
+    if run_analysis:
+        st.session_state.analysis_complete = True
+        st.session_state.player_data_loaded = False  # Reseta os dados de jogadores
+        
+        st.header(f"Análise: {regression_type}")
+        st.write(f"**Previsão de:** `{y_col}` → usando {len(x_cols)} variáveis")
+
+        try:
             X_train, X_test, y_train, y_test, scaler = prepare_data(
                 df_raw, y_col, x_cols, test_size=test_size
             )
-            
-            # Verificar se há dados suficientes
-            if X_train.empty or X_test.empty:
-                st.error("Dados insuficientes para treino e teste após o pré-processamento.")
-            elif len(X_train) < len(x_cols) + 1:
-                st.warning(f"Poucos dados ({len(X_train)}) para o número de variáveis ({len(x_cols)}). Tente reduzir as variáveis independentes.")
-            else:
-                # 2. Treinamento do Modelo
-                if regression_type == "Linear":
-                    model = LinearRegressionModel()
-                    model.train(X_train, y_train)
-                    y_pred = model.predict(X_test)
-                    metrics = model.evaluate(y_test, y_pred)
-                    
-                elif regression_type == "Logística":
-                    model = LogisticRegressionModel()
-                    model.train(X_train, y_train)
-                    y_pred_proba = model.predict_proba(X_test)
-                    y_pred_class = model.predict_class(X_test, threshold=threshold)
-                    metrics = model.evaluate(y_test, y_pred_class, y_pred_proba)
-                
-                elif regression_type == "MLP (Rede Neural)":
-                    
-                    # O número de neurônios de entrada é o número de colunas X
-                    input_dim = len(X_train.columns) 
-                    
-                    model = MLPModel(input_dim=input_dim)
-                    
-                    model.build_model(
-                        optimizer_name='Adam', 
-                        activation='relu',     
-                        hidden_layers=1,       
-                        neurons=32             
-                    )
-                    
-                    st.info(f"Treinando a MLP (Input={input_dim} neurônios). Isso pode levar um momento...")
-                    
-                    model.train(
-                        X_train, 
-                        y_train, 
-                        epochs=100, 
-                        validation_split=0.2 
-                    )
-                    st.success("Modelo MLP treinado!")
-                    
-                    # Obter previsões
-                    y_pred_proba = model.predict_proba(X_test)
-                    y_pred_class = model.predict_class(X_test, threshold=threshold)
-                    
-                    metrics = model.evaluate(y_test, y_pred_class, y_pred_proba) 
-                    
-                    # Exibir o resumo do modelo 
-                    st.subheader("Arquitetura da Rede (Relatório)")
-                    st.code(model.get_summary(), language='text')
-                
-                    
-                # 3. Exibição de Métricas e Coeficientes
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("📊 Métricas de Avaliação")
-                    metrics_df = pd.DataFrame(metrics.items(), columns=['Métrica', 'Valor'])
-                    st.dataframe(metrics_df.style.format({'Valor': "{:.4f}"}), hide_index=True)
-                
-                with col2:
-                    # MLP não tem coeficientes, então mostramos o gráfico de erro
-                    if regression_type != "MLP (Rede Neural)":
-                        st.subheader("🔢 Coeficientes da Regressão (β)")
-                        df_coef = model.get_coefficients(x_cols)
-                        st.dataframe(df_coef.style.format({'Coeficiente (β)': "{:.4f}"}), hide_index=True)
-                    else:
-                        
-                        st.subheader("📈 Histórico de Treinamento (Evolução do Erro)")
-                        history_df = model.get_history_df()
-                        if not history_df.empty:
-                            st.line_chart(history_df[['loss', 'val_loss']])
-                            st.write("Azul (loss): Erro nos dados de treino.")
-                            st.write("Laranja (val_loss): Erro nos dados de validação.")
-                
-                # Equação da Regressão
-                if regression_type != "MLP (Rede Neural)":
-                    st.subheader("📐 Equação da Regressão")
-                    if regression_type == "Linear":
-                        st.code(model.get_equation(x_cols), language='markdown')
-                    else:
-                        if hasattr(model, 'get_logistic_equation'):
-                            st.code(model.get_logistic_equation(x_cols), language='markdown')
-                        else:
-                            st.info("Equação da regressão logística não disponível.")
-                
-                # 4. Visualizações Principais
-                st.header("📈 Visualizações")
-                
-                # Gráficos principais baseados no tipo de modelo
-                if regression_type == "Linear":
-                    st.subheader("🔍 Diagrama de Dispersão com Linha de Regressão")
-                    st.plotly_chart(
-                        plot_regression_line(df_raw, x_cols, y_col), 
-                        use_container_width=True
-                    )
-                    st.subheader("🎯 Gráfico de Importância de Variáveis")
-                    st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, regression_type), use_container_width=True)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("📊 Previsão vs Realidade")
-                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, regression_type), use_container_width=True)
 
-                else:
-                    # Gráficos para Regressão Logística E MLP 
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.subheader("📊 Gráfico de Probabilidades Previstas")
-                        st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, "Logística"), use_container_width=True)
-                        
-                    with col2:
-                        st.subheader("📈 Curva ROC")
-                        st.plotly_chart(plot_roc_curve(y_test, y_pred_proba), use_container_width=True)
-                    
-                    col3, col4 = st.columns(2)
-                    
-                    with col3:
-                        st.subheader("🎯 Matriz de Confusão")
-                        st.pyplot(plot_confusion_matrix(y_test, y_pred_class), use_container_width=True)
-                        
-                    with col4:
-                        # Gráfico de importância só funciona para Logística (coeficientes)
-                        if regression_type == "Logística":
-                            st.subheader("📊 Gráfico de Importância de Variáveis")
-                            st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, regression_type), use_container_width=True)
-                        else:
-                            st.write("Gráfico de importância de variáveis (baseado em coeficientes) não se aplica diretamente a MLPs.")
-                    
-                    # Gráficos de curva sigmoide (só para Logística)
-                    if regression_type == "Logística":
-                        st.subheader("🔍 Diagrama de Dispersão - Regressão Logística")
-                        st.plotly_chart(
-                            plot_multiple_logistic_curves(df_raw, x_cols, y_col, model=model), 
-                            use_container_width=True
-                        )
-                        if x_cols:
-                            st.subheader("🔄 Curva Sigmoide")
-                            example_var = x_cols[0]
-                            st.plotly_chart(
-                                plot_logistic_sigmoid_curve(df_raw, example_var, y_col, model=model), 
-                                use_container_width=True
+            if X_train.empty or len(X_train) < 10:
+                st.error("Dados insuficientes após pré-processamento.")
+                st.stop()
+
+            # =============================================
+            # TREINAMENTO DOS MODELOS
+            # =============================================
+            if regression_type == "Regressão Linear":
+                model = LinearRegressionModel()
+                model.train(X_train, y_train)
+                y_pred = model.predict(X_test)
+                metrics = model.evaluate(y_test, y_pred)
+
+            elif regression_type == "Regressão Logística":
+                model = LogisticRegressionModel()
+                model.train(X_train, y_train)
+                y_pred_proba = model.predict_proba(X_test)
+                y_pred_class = model.predict_class(X_test, threshold=threshold)
+                metrics = model.evaluate(y_test, y_pred_class, y_pred_proba)
+
+            else:  # MLP
+                input_dim = X_train.shape[1]
+                model = MLPModel(input_dim=input_dim)
+                model.build_model(hidden_layers=2, neurons=64, activation='relu', optimizer_name='Adam')
+
+                with st.spinner("Treinando Rede Neural (MLP)... Aguarde até 30s"):
+                    model.train(X_train.values, y_train.values, epochs=200, batch_size=4, validation_split=0.2)
+                st.success("Rede Neural treinada!")
+
+                y_pred_proba = model.predict_proba(X_test.values)
+                y_pred_class = model.predict_class(X_test.values, threshold=threshold)
+                metrics = model.evaluate(y_test, y_pred_class, y_pred_proba)
+
+            # =============================================
+            # MÉTRICAS
+            # =============================================
+            st.subheader("Métricas de Desempenho")
+            metrics_df = pd.DataFrame(metrics.items(), columns=["Métrica", "Valor"])
+            st.dataframe(metrics_df.style.format({"Valor": "{:.4f}"}))
+
+            # =============================================
+            # VISUALIZAÇÕES ESPECÍFICAS POR MODELO
+            # =============================================
+            st.markdown("---")
+            st.header("Análise Visual")
+
+            # ---------- REGRESSÃO LINEAR ----------
+            if regression_type == "Regressão Linear":
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Dispersão com Linha de Regressão")
+                    st.plotly_chart(plot_regression_line(df_raw, x_cols, y_col), use_container_width=True)
+                with col2:
+                    st.subheader("Importância das Variáveis")
+                    st.plotly_chart(plot_feature_importance(model.model.coef_, x_cols, "Linear"), use_container_width=True)
+
+                st.subheader("Previsão vs Realidade")
+                st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred, "Linear"), use_container_width=True)
+
+            # ---------- REGRESSÃO LOGÍSTICA ----------
+            elif regression_type == "Regressão Logística":
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Probabilidades Previstas")
+                    st.plotly_chart(plot_prediction_vs_reality(y_test, y_pred_proba, "Logística"), use_container_width=True)
+                with col2:
+                    st.subheader("Curva ROC")
+                    st.plotly_chart(plot_roc_curve(y_test, y_pred_proba), use_container_width=True)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Matriz de Confusão")
+                    st.pyplot(plot_confusion_matrix(y_test, y_pred_class))
+                with col2:
+                    st.subheader("Importância das Variáveis")
+                    st.plotly_chart(plot_feature_importance(model.model.coef_[0], x_cols, "Logística"), use_container_width=True)
+
+                st.subheader("Curvas Sigmoides")
+                st.plotly_chart(plot_multiple_logistic_curves(df_raw, x_cols, y_col, model=model), use_container_width=True)
+
+            # ---------- MLP (REDE NEURAL) ----------
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Evolução do Erro (com suavização)")
+                    history_df = model.get_history_df()
+                    if not history_df.empty:
+                        st.plotly_chart(plot_training_history_smoothed(history_df), use_container_width=True)
+                with col2:
+                    st.subheader("Previsão vs Realidade (MLP)")
+                    st.plotly_chart(plot_mlp_prediction_vs_reality(y_test, y_pred_proba, y_pred_class), use_container_width=True)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Histograma das Probabilidades")
+                    st.plotly_chart(plot_probability_histogram(y_test, y_pred_proba), use_container_width=True)
+                with col2:
+                    st.subheader("Classe Predita × Real")
+                    st.plotly_chart(plot_predicted_vs_actual_scatter(y_test, y_pred_class), use_container_width=True)
+
+                st.subheader("Matriz de Confusão")
+                st.pyplot(plot_confusion_matrix(y_test, y_pred_class))
+
+                st.subheader("Intervalo de Confiança 95% (Bootstrap)")
+                st.plotly_chart(plot_bootstrap_confidence(y_pred_proba), use_container_width=True)
+
+       
+                st.subheader("Evolução Temporal: Resultado Real vs Previsão MLP")
+
+                # Passo 1: Pegar os dados de teste com seus índices originais
+                df_test_with_date = df_raw.loc[X_test.index].copy()
+
+                # Passo 2: Adicionar as previsões e os valores reais
+                df_test_with_date = df_test_with_date.assign(
+                    Real=y_test.values,         # valores reais (na ordem do X_test)
+                    Previsão_Probabilidade=y_pred_proba    # probabilidades previstas
+                )
+
+                # Passo 3: Ordenar por data
+                df_plot = df_test_with_date.sort_values('GAME_DATE').reset_index(drop=True)
+
+                # Passo 4: Plotar
+                fig = go.Figure()
+
+                # Linha do resultado real (0 ou 1)
+                fig.add_trace(go.Scatter(
+                    x=df_plot['GAME_DATE'],
+                    y=df_plot['Real'],
+                    mode='lines+markers',
+                    name='Resultado Real (Vitória=1)',
+                    line=dict(color='black', width=3),
+                    marker=dict(size=8)
+                            ))
+
+                # Linha da probabilidade prevista pela MLP
+                fig.add_trace(go.Scatter(
+                    x=df_plot['GAME_DATE'],
+                    y=df_plot['Previsão_Probabilidade'],
+                    mode='lines',
+                    name='Previsão MLP (probabilidade)',
+                    line=dict(color='red', width=3)
+                            ))
+
+                # Linha do threshold
+                fig.add_hline(y=threshold, line_dash="dash", line_color="orange",
+                  annotation_text=f"Threshold = {threshold}", annotation_position="top left")
+
+                fig.update_layout(
+                    title="Comparação Temporal: Resultado Real vs Previsão da Rede Neural",
+                    xaxis_title="Data do Jogo",
+                    yaxis_title="Vitória (1) / Derrota (0) | Probabilidade",
+                    yaxis=dict(range=[-0.1, 1.1], tickvals=[0, 0.5, 1]),
+                    template="plotly_white",
+                    height=550,
+                    legend=dict(y=1.15, orientation='h')
                             )
 
-                # 5. Análise de Tendência
-                st.subheader(f"📈 Gráfico de Tendência com Intervalo de Confiança")
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Salvar dados no session state para uso posterior
+                st.session_state.df_test_with_date = df_test_with_date
+                st.session_state.y_test = y_test
+                st.session_state.y_pred_proba = y_pred_proba
+                st.session_state.y_pred_class = y_pred_class
+
+            # =============================================
+            # GRÁFICO COMUM: TENDÊNCIA TEMPORAL
+            # =============================================
+            st.markdown("---")
+            st.subheader("Tendência Temporal da Performance")
+            st.plotly_chart(plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size),
+                            use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Erro durante a análise: {e}")
+            st.exception(e)
+    
+    # Se a análise já foi completada, mostra apenas os resultados
+    elif st.session_state.analysis_complete:
+        st.header(f"Análise: {regression_type}")
+        st.write(f"**Previsão de:** `{y_col}` → usando {len(x_cols)} variáveis")
+        st.info("✅ Análise já executada. Modifique os parâmetros abaixo sem precisar reexecutar.")
+
+    # =============================================
+    # ANÁLISES ADICIONAIS (apenas para MLP)
+    # =============================================
+    if regression_type == "MLP (Rede Neural)" and st.session_state.analysis_complete:
+        st.markdown("---")
+        st.subheader("Análises Adicionais (Players e Time)")
+
+        # 1) Ranking de Jogadores (Player-level)
+        with st.expander("Ranking dos Jogadores (Player Game Log)", expanded=False):
+            # Carregar dados de jogadores apenas uma vez
+            if not st.session_state.player_data_loaded:
+                st.write("Carregando estatísticas por jogador via NBA API...")
+                
+                try:
+                    df_players_games, df_players_agg = load_player_game_log(team_id)
+                    
+                    if df_players_agg is None or df_players_agg.empty:
+                        st.warning("""
+                        Dados de jogadores indisponíveis no momento. Isso pode ocorrer devido a:
+                        - Limitações da NBA API
+                        - Temporada muito recente
+                        - Problemas de conexão
+                        
+                        **Dica:** Tente times mais populares como 'Los Angeles Lakers' ou 'Golden State Warriors'
+                        """)
+                    else:
+                        # Salvar no session state
+                        st.session_state.df_players_agg = df_players_agg
+                        st.session_state.df_players_games = df_players_games
+                        st.session_state.player_data_loaded = True
+                        st.success("Dados de jogadores carregados!")
+                        
+                except Exception as e:
+                    st.error(f"Erro ao carregar dados de jogadores: {e}")
+            
+            # Se os dados estão carregados, mostrar interface interativa
+            if st.session_state.player_data_loaded and st.session_state.df_players_agg is not None:
+                # Escolher métrica para ranking
+                metric_options = [c for c in st.session_state.df_players_agg.columns if c.endswith('_mean') and c != 'GAMES_PLAYED_mean']
+                
+                if metric_options:
+                    # Usar session state para manter a seleção
+                    selected_metric = st.selectbox(
+                        "Escolha a métrica para ranking:", 
+                        options=metric_options, 
+                        index=metric_options.index(st.session_state.selected_metric) if st.session_state.selected_metric in metric_options else 0,
+                        key="metric_selector"
+                    )
+                    
+                    # Atualizar session state quando a métrica mudar
+                    if selected_metric != st.session_state.selected_metric:
+                        st.session_state.selected_metric = selected_metric
+                    
+                    # Slider para Top N
+                    top_n = st.slider(
+                        "Top N jogadores:", 
+                        3, 20, 
+                        value=st.session_state.top_n,
+                        key="top_n_slider"
+                    )
+                    
+                    # Atualizar session state quando o top_n mudar
+                    if top_n != st.session_state.top_n:
+                        st.session_state.top_n = top_n
+                    
+                    # Plotar o gráfico
+                    st.plotly_chart(
+                        plot_player_ranking(
+                            st.session_state.df_players_agg, 
+                            metric=st.session_state.selected_metric, 
+                            top_n=st.session_state.top_n
+                        ), 
+                        use_container_width=True
+                    )
+                    
+                    # Mostrar tabela resumo
+                    st.subheader("Resumo dos Jogadores")
+                    display_cols = ['PLAYER_NAME', 'GAMES_PLAYED', 'PTS_mean', 'REB_mean', 'AST_mean']
+                    available_cols = [col for col in display_cols if col in st.session_state.df_players_agg.columns]
+                    st.dataframe(st.session_state.df_players_agg[available_cols].head(st.session_state.top_n))
+                else:
+                    st.warning("Nenhuma métrica disponível para ranking.")
+
+        # 2) Comparação Time x Adversário
+        with st.expander("Comparação Time x Adversário"):
+            try:
+                st.plotly_chart(plot_team_vs_opponent(df_raw, stats=['PTS','REB','AST']), use_container_width=True)
+            except Exception as e:
+                st.warning(f"Erro ao gerar comparação Time x Adversário: {e}")
+
+        # 3) Evolução Temporal da Performance (Rolling)
+        with st.expander("Evolução Temporal da Performance (Rolling)"):
+            if 'df_test_with_date' in st.session_state:
+                # Usar dados salvos no session state
+                df_test_with_date = st.session_state.df_test_with_date.copy()
+                
+                # Usar a coluna de probabilidade para o gráfico rolling
+                if 'GAME_DATE' not in df_test_with_date.columns and isinstance(df_test_with_date.index, pd.DatetimeIndex):
+                    df_test_with_date = df_test_with_date.reset_index().rename(columns={'index':'GAME_DATE'})
+                
                 st.plotly_chart(
-                    plot_trend_with_confidence(df_raw, 'GAME_DATE', y_col, window=window_size), 
+                    plot_rolling_performance(
+                        df_test_with_date, 
+                        y_true_col='Real', 
+                        y_pred_col='Previsão_Probabilidade',  # Usar probabilidades
+                        window=window_size
+                    ), 
                     use_container_width=True
                 )
-       
-        except LinAlgError as e:
-            if "singular matrix" in str(e).lower():
-                st.error("""
-                **❌ Erro de Matriz Singular**: Isso geralmente ocorre quando:
-                - Há multicolinearidade (variáveis muito correlacionadas)
-                - Mais variáveis do que observações
-                - Variáveis com variância zero
-                
-                **💡 Soluções**: 
-                - Remova variáveis altamente correlacionadas
-                - Reduza o número de variáveis independentes
-                - Tente diferentes combinações de variáveis
-                """)
             else:
-                st.error(f"Erro de álgebra linear: {e}")
-        except ValueError as e:
-            st.error(f"Erro nos dados: {e}")
-        except Exception as e:
-            st.error(f"Ocorreu um erro durante a análise: {e}")
-            st.exception(e)
-            
-    elif run_analysis and (not y_col or not x_cols):
-        st.warning("⚠️ Por favor, selecione a Variável Dependente (Y) e pelo menos uma Variável Independente (X) para executar a análise.")
+                st.warning("Dados de teste não disponíveis. Execute a análise novamente.")
 
-else:
-    st.info("👆 Selecione uma equipe na sidebar para começar a análise.")
-
-# Rodapé
+# ------------------------------------------------------------------
+# RODAPÉ
+# ------------------------------------------------------------------
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: gray;'>
-    🏀 Desenvolvido com NBA API e Streamlit • Análise Preditiva de Dados da NBA
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.caption("Desenvolvido para a disciplina de Redes Neurais e Deep Learning • NBA API + Streamlit + Scikit-learn + TensorFlow")
+
+# Botão para resetar a análise
+if st.session_state.analysis_complete:
+    if st.sidebar.button("🔄 Resetar Análise"):
+        st.session_state.analysis_complete = False
+        st.session_state.player_data_loaded = False
+        st.session_state.df_players_agg = None
+        st.session_state.df_players_games = None
+        st.session_state.selected_metric = 'PTS_mean'
+        st.session_state.top_n = 10
+        st.rerun()

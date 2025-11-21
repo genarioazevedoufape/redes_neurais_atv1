@@ -17,7 +17,7 @@ class MLPModel:
         self.input_dim = input_dim # Número de features de entrada
         self.metrics_to_calculate = ['accuracy'] # Métricas do Keras
         
-    def build_model(self, optimizer_name='Adam', activation='relu', hidden_layers=1, neurons=32):
+    def build_model(self, optimizer_name='Adam', activation='relu', hidden_layers=1, neurons=8):
         """
         Constrói a arquitetura do modelo.
         """
@@ -39,7 +39,7 @@ class MLPModel:
             
             # Adiciona Dropout 
             # Técnica para evitar overfitting, "desligando" neurônios no treino
-            self.model.add(Dropout(0.3)) # 30% de dropout
+            self.model.add(Dropout(0.5)) # 30% de dropout
             
             if current_neurons > 16:
                 current_neurons = current_neurons // 2 
@@ -66,7 +66,7 @@ class MLPModel:
             metrics=self.metrics_to_calculate
         )
         
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, epochs=100, batch_size=32, validation_split=0.2):
+    def train(self, X_train: pd.DataFrame, y_train: pd.Series, epochs=100, batch_size=2, validation_split=0.2):
         """
         Treina o modelo de MLP.
         """
@@ -77,7 +77,7 @@ class MLPModel:
         # Monitora a perda na validação ('val_loss')
         early_stopping_callback = EarlyStopping(
             monitor='val_loss',
-            patience=10,          # Nº de épocas sem melhora antes de parar
+            patience=20,          # Nº de épocas sem melhora antes de parar
             restore_best_weights=True # Restaura os melhores pesos do modelo
         )
         
@@ -141,3 +141,6 @@ class MLPModel:
         if self.history:
             return pd.DataFrame(self.history.history)
         return pd.DataFrame()
+
+
+    
